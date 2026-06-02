@@ -83,11 +83,12 @@ const highConvenienceStations = new Set([
 
 const areaRules = [
   { area: "海淀高校区", transitZone: "northwest", pattern: /安河桥|北宫门|西苑|圆明园|北京大学|中关村|海淀|人民大学|魏公村|国家图书馆|动物园|五道口|知春|西土城|牡丹园|巴沟|苏州|清华|六道口|北沙滩|西二旗|清河|上地|万泉河|万寿寺|农大|永丰|西北旺|马连洼/ },
+  { area: "通州区域", transitZone: "east-far", pattern: /通州北苑|果园|九棵树|梨园|临河里|土桥|通州北关|北运河|郝家府|东夏园|潞城|物资学院|花庄|环球度假区/ },
+  { area: "大兴/南部区域", transitZone: "south", pattern: /亦庄|荣京东街|荣昌东街|同济南路|经海路|旧宫|小红门|宋家庄|新宫|西红门|高米店|枣园|清源路|黄村|义和庄|生物医药基地|天宫院|大兴|瀛海|德茂|五福堂|火箭万源|东高地|和义|新发地|大兴机场/ },
   { area: "朝阳/东部区域", transitZone: "east", pattern: /传媒|高碑店|双桥|管庄|八里桥|国贸|大望路|四惠|青年路|十里堡|金台|呼家楼|东大桥|团结湖|亮马桥|农业展览馆|三元桥|太阳宫|芍药居|望京|将台|东风北桥|枣营|朝阳公园|平乐园|北工大|九龙山|大郊亭|百子湾|化工|南楼梓庄|善各庄|来广营|东湖渠|阜通|马泉营|孙河|国展|花梨坎|后沙峪|常营|草房|褡裢坡|黄渠|物资学院|通州北关|北运河|潞城|欢乐谷|垡头|双合|焦化厂|北神树|次渠|亦庄火车站|嘉会湖/ },
   { area: "房山/良乡区域", transitZone: "southwest-far", pattern: /阎村|苏庄|良乡|广阳城|篱笆房|长阳|稻田|大葆台|房山|燕山|紫草坞|星城|大石河|马各庄|饶乐府/ },
   { area: "昌平/沙河区域", transitZone: "north-far", pattern: /昌平|十三陵|北邵洼|南邵|沙河|巩华城|朱辛庄|生命科学园|回龙观|霍营|龙泽|平西府|育知路|天通苑|立水桥|北苑/ },
   { area: "石景山区域", transitZone: "west", pattern: /苹果园|古城|八角|八宝山|金安桥|杨庄|西黄村|廖公庄|田村|首钢|石厂|小园|栗园庄|上岸|桥户营|四道桥/ },
-  { area: "大兴/南部区域", transitZone: "south", pattern: /新宫|西红门|高米店|枣园|清源路|黄村|义和庄|生物医药基地|天宫院|大兴|瀛海|德茂|五福堂|火箭万源|东高地|和义|新发地|大兴机场/ },
   { area: "城区交通便利区域", transitZone: "city-center", pattern: /西直门|积水潭|鼓楼|什刹海|南锣鼓巷|安定门|雍和宫|东直门|朝阳门|北京站|北京南站|崇文门|前门|和平门|宣武门|长椿街|阜成门|车公庄|木樨地|南礼士路|西单|天安门|王府井|新街口|平安里|西四|灵境胡同|菜市口|陶然亭|牛街|虎坊桥|珠市口|桥湾|广渠门|双井|北海北|东四|张自忠路|北新桥|天桥|永定门|木樨园|北京西站|湾子|达官营|广安门|六里桥|白堆子|丽泽|太平桥|北太平庄|奥林匹克公园|森林公园南门|奥体中心|北土城/ }
 ];
 
@@ -125,5 +126,82 @@ export const beijingSubwayStations = [...linesByStationName()].map(([name, lines
     area,
     transitZone,
     convenience: highConvenienceStations.has(name) || lines.length > 1 ? "高" : "中"
+  };
+});
+
+export const curatedBeijingSubwayStations = [
+  { name: "十里堡站", aliases: ["十里堡", "十里堡站", "十里堡地铁站"], type: "subway_station", district: "朝阳区", address: "北京市朝阳区朝阳路与石佛营路附近", lat: 39.9225, lng: 116.5020, subwayLines: ["6号线"], nearbyBusStops: ["十里堡北里公交站", "十里堡小区公交站"], region: "朝阳" },
+  { name: "五道口站", aliases: ["五道口", "五道口站", "五道口地铁站"], type: "subway_station", district: "海淀区", address: "北京市海淀区成府路五道口附近", lat: 39.9929, lng: 116.3376, subwayLines: ["13号线"], nearbyBusStops: ["五道口公交站"], region: "海淀" },
+  { name: "西土城站", aliases: ["西土城", "西土城站", "西土城地铁站"], type: "subway_station", district: "海淀区", address: "北京市海淀区西土城路附近", lat: 39.9766, lng: 116.3540, subwayLines: ["10号线"], nearbyBusStops: ["学知桥南公交站", "蓟门桥北公交站"], region: "海淀" },
+  { name: "蓟门桥站", aliases: ["蓟门桥", "蓟门桥站", "蓟门桥地铁站"], type: "subway_station", district: "海淀区", address: "北京市海淀区蓟门桥附近", lat: 39.9675, lng: 116.3550, subwayLines: ["12号线"], nearbyBusStops: ["蓟门桥北公交站", "蓟门桥西公交站"], region: "海淀" },
+  { name: "海淀黄庄站", aliases: ["海淀黄庄", "海淀黄庄站", "海淀黄庄地铁站"], type: "subway_station", district: "海淀区", address: "北京市海淀区中关村大街与知春路交叉口附近", lat: 39.9756, lng: 116.3176, subwayLines: ["4号线", "10号线"], nearbyBusStops: ["海淀黄庄北公交站", "海淀黄庄南公交站"], region: "海淀" },
+  { name: "北京大学东门站", aliases: ["北京大学东门", "北京大学东门站", "北大东门", "北大东门地铁站"], type: "subway_station", district: "海淀区", address: "北京市海淀区中关村北大街北京大学东门附近", lat: 39.9916, lng: 116.3158, subwayLines: ["4号线"], nearbyBusStops: ["北京大学东门公交站"], region: "海淀" },
+  { name: "圆明园站", aliases: ["圆明园", "圆明园站", "圆明园地铁站"], type: "subway_station", district: "海淀区", address: "北京市海淀区清华西路圆明园附近", lat: 39.9995, lng: 116.3098, subwayLines: ["4号线"], nearbyBusStops: ["圆明园南门公交站"], region: "海淀" },
+  { name: "南锣鼓巷站", aliases: ["南锣鼓巷", "南锣", "南锣鼓巷站", "南锣鼓巷地铁站"], type: "subway_station", district: "东城区", address: "北京市东城区南锣鼓巷附近", lat: 39.9337, lng: 116.4037, subwayLines: ["6号线", "8号线"], nearbyBusStops: ["锣鼓巷公交站"], region: "东城" },
+  { name: "前门站", aliases: ["前门", "前门站", "前门地铁站"], type: "subway_station", district: "东城区", address: "北京市东城区前门大街附近", lat: 39.9002, lng: 116.3979, subwayLines: ["2号线", "8号线"], nearbyBusStops: ["前门公交站"], region: "东城" },
+  { name: "王府井站", aliases: ["王府井", "王府井站", "王府井地铁站"], type: "subway_station", district: "东城区", address: "北京市东城区王府井大街附近", lat: 39.9087, lng: 116.4116, subwayLines: ["1号线", "8号线"], nearbyBusStops: ["王府井公交站"], region: "东城" },
+  { name: "天坛东门站", aliases: ["天坛东门", "天坛东门站", "天坛东门地铁站"], type: "subway_station", district: "东城区", address: "北京市东城区天坛东门附近", lat: 39.8826, lng: 116.4208, subwayLines: ["5号线"], nearbyBusStops: ["天坛东门公交站"], region: "东城" },
+  { name: "亮马桥站", aliases: ["亮马桥", "亮马桥站", "亮马桥地铁站"], type: "subway_station", district: "朝阳区", address: "北京市朝阳区亮马桥路附近", lat: 39.9494, lng: 116.4618, subwayLines: ["10号线"], nearbyBusStops: ["亮马桥公交站"], region: "朝阳" },
+  { name: "望京南站", aliases: ["望京南", "望京南站", "望京南地铁站"], type: "subway_station", district: "朝阳区", address: "北京市朝阳区望京南附近", lat: 39.9847, lng: 116.4816, subwayLines: ["14号线"], nearbyBusStops: ["望京南公交站"], region: "朝阳" },
+  { name: "通州北关站", aliases: ["通州北关", "通州北关站", "通州北关地铁站"], type: "subway_station", district: "通州区", address: "北京市通州区通州北关附近", lat: 39.9161, lng: 116.6611, subwayLines: ["6号线"], nearbyBusStops: ["通州北关公交站"], region: "通州" }
+];
+
+export const beijingRailwayStations = [
+  { name: "北京南站", aliases: ["北京南站", "北京南站地铁站"], type: "railway_station", district: "丰台区", address: "北京市丰台区北京南站", lat: 39.8652, lng: 116.3788, subwayLines: ["4号线", "14号线"], nearbyBusStops: ["北京南站公交站"], region: "丰台" },
+  { name: "北京站", aliases: ["北京站"], type: "railway_station", district: "东城区", address: "北京市东城区毛家湾胡同甲13号", lat: 39.9049, lng: 116.4273, subwayLines: ["2号线"], nearbyBusStops: ["北京站东公交站"], region: "东城" },
+  { name: "北京西站", aliases: ["北京西站"], type: "railway_station", district: "丰台区", address: "北京市丰台区莲花池东路118号", lat: 39.8948, lng: 116.3213, subwayLines: ["7号线", "9号线"], nearbyBusStops: ["北京西站公交站"], region: "丰台" }
+];
+
+function normalizeStationQuery(input) {
+  return String(input || "").trim().replace(/\s+/g, "").replace(/地铁站|地铁/g, "站");
+}
+
+export function findCuratedSubwayStation(input) {
+  const normalized = normalizeStationQuery(input);
+  return curatedBeijingSubwayStations.find((station) => station.aliases.some((alias) => normalizeStationQuery(alias) === normalized))
+    || curatedBeijingSubwayStations.find((station) => station.aliases.some((alias) => normalized.includes(normalizeStationQuery(alias))));
+}
+
+export function findRailwayStation(input) {
+  const normalized = normalizeStationQuery(input);
+  return beijingRailwayStations.find((station) => station.aliases.some((alias) => normalizeStationQuery(alias) === normalized));
+}
+
+const curatedByName = new Map(curatedBeijingSubwayStations.map((station) => [station.name.replace(/站$/, ""), station]));
+
+function regionFromArea(area) {
+  if (area?.includes("海淀")) return "海淀";
+  if (area?.includes("朝阳")) return "朝阳";
+  if (area?.includes("通州")) return "通州";
+  if (area?.includes("大兴")) return "大兴";
+  if (area?.includes("房山")) return "房山";
+  if (area?.includes("昌平")) return "昌平";
+  if (area?.includes("石景山")) return "石景山";
+  return "城区";
+}
+
+function fullStationAliases(name) {
+  const base = name.replace(/站$/, "");
+  return [...new Set([name, base, `${base}站`, `${base}地铁站`, `${base}地铁`])];
+}
+
+export const fullBeijingSubwayStationDatabase = beijingSubwayStations.map((station) => {
+  const base = station.name.replace(/站$/, "");
+  const curated = curatedByName.get(base);
+  return {
+    name: `${base}站`,
+    aliases: [...new Set([...fullStationAliases(station.name), ...(station.aliases || []), ...(curated?.aliases || [])])],
+    type: "subway_station",
+    city: "北京市",
+    district: curated?.district || station.area.replace(/高校区|区域|交通便利/g, "") || "北京市",
+    address: curated?.address || `北京市${station.area} ${base}地铁站附近`,
+    lat: curated?.lat,
+    lng: curated?.lng,
+    subwayLines: curated?.subwayLines || station.lines,
+    region: curated?.region || regionFromArea(station.area),
+    nearbyBusStops: curated?.nearbyBusStops || [],
+    area: station.area,
+    transitZone: station.transitZone,
+    source: "local_subway_database"
   };
 });

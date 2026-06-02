@@ -9,8 +9,10 @@ const areaFallbackRules = [
   { pattern: /传媒大学|中国传媒大学|朝阳|定福庄|管庄|国贸|望京|三里屯|朝阳大悦城|合生汇|798|青年路|团结湖|亮马桥|将台/, area: "朝阳/东部区域", transitZone: "east" },
   { pattern: /石景山|首钢|苹果园|古城|金安桥/, area: "石景山区域", transitZone: "west" },
   { pattern: /通州|梨园|土桥|北苑/, area: "通州区域", transitZone: "east-far" },
+  { pattern: /亦庄|荣京东街|同济南路|经海路|旧宫/, area: "大兴/南部区域", transitZone: "south" },
+  { pattern: /北京南站|丰台|陶然亭|菜市口|天坛|蒲黄榆/, area: "城区交通便利区域", transitZone: "southwest-central" },
   { pattern: /大兴|西红门|黄村/, area: "大兴/南部区域", transitZone: "south" },
-  { pattern: /西直门|北京站|北京南站|北京西站|前门|东单|西单|牛街|护国寺|平安里|广安门内|什刹海|南锣鼓巷|奥林匹克公园|森林公园南门/, area: "城区交通便利区域", transitZone: "city-center" }
+  { pattern: /西直门|北京站|北京西站|前门|东单|西单|牛街|护国寺|平安里|广安门内|什刹海|南锣鼓巷|奥林匹克公园|森林公园南门/, area: "城区交通便利区域", transitZone: "city-center" }
 ];
 
 function normalizeStartText(input) {
