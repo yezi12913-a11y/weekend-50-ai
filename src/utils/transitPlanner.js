@@ -1,4 +1,6 @@
 import { buildAmapRouteUrl, distanceMeters } from "./amapService.js";
+import { isAmapKeyError } from "./amapClient.js";
+import { planTransferByJsApi } from "./amapJsSearch.js";
 import { fallbackTransitFromLocation, findNearbyBusStops, findNearbySubwayStations, selectBestTransitStation } from "./nearbyTransit.js";
 
 export function estimateTransitCostByDistance(distance) {
@@ -36,6 +38,17 @@ export function selectStartTransitStation(location, subwayStations = [], busStat
       reason: "用户输入的是地铁站，因此优先从该地铁站出发"
     };
   }
+  const localStartSubway = location?.nearestSubwayStations?.[0] || location?.nearbySubwayStations?.[0] || location?.startSubwayStation?.name;
+  if (localStartSubway) {
+    return {
+      name: localStartSubway,
+      type: "subway",
+      lines: [],
+      lat: location?.lat,
+      lng: location?.lng,
+      reason: "用户起点已有明确推荐地铁站，因此保留该站作为主出发站"
+    };
+  }
   if (location?.type === "railway_station") {
     return {
       name: location.name,
@@ -62,6 +75,27 @@ export function selectEndTransitStation(destination, subwayStations = [], busSta
   return { name: destination?.name || "目的地", type: "walking_start", lines: [], lat: destination?.lat, lng: destination?.lng, exitSuggestion: "按地图步行到目的地" };
 }
 
+async function getAmapTransferEstimate(from, to) {
+  if (!Number.isFinite(from?.lng) || !Number.isFinite(from?.lat) || !Number.isFinite(to?.lng) || !Number.isFinite(to?.lat)) {
+    return { status: "route_no_result", message: "缺少有效经纬度。" };
+  }
+  try {
+    const result = await planTransferByJsApi({ from, to });
+    if (result.status !== "ok") return { status: result.status, message: result.info, result: result.result };
+    const plan = result.plan;
+    return {
+      status: "map_loaded",
+      duration: Number(plan.time),
+      distance: Number(plan.distance),
+      cost: Number(plan.cost)
+    };
+  } catch (error) {
+    if (isAmapKeyError(error?.code)) return { status: "amap_key_error", message: error.message, error };
+    if (!["missing_key", "missing_security_code"].includes(error?.code)) console.error("Transfer status/result:", "error", error);
+    return { status: error?.code === "missing_key" || error?.code === "missing_security_code" ? error.code : "route_failed", message: error?.message || "路线规划失败。", error };
+  }
+}
+
 export async function planTransitRoute({ from, to }) {
   const distance = distanceMeters(from, to);
   const [startSubwayFromApi, startBusFromApi, endSubwayFromApi, endBusFromApi] = await Promise.all([
@@ -78,7 +112,14 @@ export async function planTransitRoute({ from, to }) {
   const endBus = endBusFromApi.length ? endBusFromApi : endFallback.bus;
   const primaryStartStation = selectStartTransitStation(from, startSubway, startBus);
   const primaryEndStation = selectEndTransitStation(to, endSubway, endBus);
-  const estimatedTransportCost = estimateTransitCostByDistance(distance);
+  const amapTransfer = await getAmapTransferEstimate(from, to);
+  const estimatedTransportCost = Number.isFinite(amapTransfer?.cost) && amapTransfer.cost > 0
+    ? Math.max(4, Math.round(amapTransfer.cost * 2))
+    : estimateTransitCostByDistance(distance);
+  const routeDistance = Number.isFinite(amapTransfer?.distance) ? amapTransfer.distance : distance;
+  const routeDuration = Number.isFinite(amapTransfer?.duration)
+    ? `${Math.max(10, Math.round(amapTransfer.duration / 60))}分钟`
+    : estimateDuration(distance);
 
   const plan = {
     fromName: from?.name || from?.rawInput || "出发地",
@@ -98,8 +139,14 @@ export async function planTransitRoute({ from, to }) {
     destinationLat: to?.lat,
     destinationLng: to?.lng,
     primaryEndStation,
-    estimatedDuration: estimateDuration(distance),
-    estimatedDistance: Number.isFinite(distance) ? `${(distance / 1000).toFixed(1)}公里` : "按地图导航为准",
+    routePlanningStatus: amapTransfer?.status || "route_no_result",
+    routePlanningNotice: amapTransfer?.status === "route_no_result"
+      ? "地图已加载，但本次路线规划未返回结果，已使用估算交通信息。"
+      : amapTransfer?.status === "route_failed"
+        ? `路线规划失败，已使用估算交通信息。${amapTransfer.message ? `原因：${amapTransfer.message}` : ""}`
+        : "",
+    estimatedDuration: routeDuration,
+    estimatedDistance: Number.isFinite(routeDistance) ? `${(routeDistance / 1000).toFixed(1)}公里` : "按地图导航为准",
     estimatedTransportCost,
     mapRouteUrl: buildAmapRouteUrl(from, to)
   };

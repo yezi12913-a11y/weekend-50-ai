@@ -15,6 +15,7 @@ import { findNearbyBusStops, findNearbySubwayStations } from "./utils/nearbyTran
 import { searchNearbyBudgetFood, searchNearbyComfortStops, searchNearbyConvenienceStores, searchNearbyDrinkShops, selectBestPoiByDistanceAndBudget } from "./utils/poiSearch.js";
 import { sortRoutesForUser } from "./utils/recommendationScoring.js";
 import { planTransitRoute } from "./utils/transitPlanner.js";
+import { AMAP_KEY_ERROR_CODES, getAmapConfigStatus, getAmapPoiFailureMessage } from "./utils/amapClient.js";
 
 const activityOptions = [
   "逛街",
@@ -276,6 +277,31 @@ async function enrichStartLocationTransit(startLocation) {
   };
 }
 
+function getPoiFailureReason(groups = []) {
+  const statuses = groups.map((group) => group?.poiStatus).filter(Boolean);
+  const errorCodes = groups.flatMap((group) => [group?.poiErrorCode, group?.poiErrorMessage]).filter(Boolean);
+  if (statuses.includes("amap_key_error") || errorCodes.some((value) => AMAP_KEY_ERROR_CODES.some((code) => String(value).includes(code)))) return "amap_key_error";
+  if (statuses.includes("missing_web_service_key")) return "missing_web_service_key";
+  if (statuses.includes("missing_key")) return "missing_key";
+  if (statuses.includes("missing_security_code")) return "missing_security_code";
+  if (statuses.includes("poi_no_result")) return "poi_no_result";
+  if (statuses.includes("route_no_result")) return "route_no_result";
+  if (statuses.some((status) => ["amap_web_service_error", "http_error", "poi_failed", "route_failed"].includes(status))) return "partial_map_result";
+  return getAmapConfigStatus().status === "configured" ? "poi_no_result" : getAmapConfigStatus().status;
+}
+
+function getPoiFailureDetail(groups = []) {
+  return groups.map((group) => group?.poiErrorMessage || group?.poiErrorCode).filter(Boolean)[0] || "";
+}
+
+function isRealPoiSource(source) {
+  return ["amap_poi", "amap_js_api", "amap_web_service"].includes(source);
+}
+
+function hasRealAmapPoi(route) {
+  return (route?.steps || []).some((step) => isRealPoiSource(step.source) || isRealPoiSource(step.primaryPoi?.source));
+}
+
 async function buildPoiStep(step, route, budget) {
   const destination = route.destinationLocation || primaryDestinationLocation(route);
   if (!Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) return step;
@@ -284,14 +310,19 @@ async function buildPoiStep(step, route, budget) {
     searchNearbyConvenienceStores({ lat: destination.lat, lng: destination.lng, name: destination.name || route.destination, rawInput: route.destination }),
     searchNearbyDrinkShops({ lat: destination.lat, lng: destination.lng, name: destination.name || route.destination, rawInput: route.destination, budget })
   ]);
-  const candidates = foods.length ? foods : [...convenience, ...drinks];
+  const poiFailureReason = getPoiFailureReason([foods, convenience, drinks]);
+  const poiFailureDetail = getPoiFailureDetail([foods, convenience, drinks]);
+  const candidates = (foods.length ? foods : [...convenience, ...drinks]).filter((poi) => isRealPoiSource(poi.source));
   const primaryPoi = selectBestPoiByDistanceAndBudget(candidates, budget);
   if (!primaryPoi) {
+    const message = getAmapPoiFailureMessage(poiFailureReason, poiFailureDetail);
     return {
       ...step,
-      source: "poi_unavailable",
-      whyRecommended: "暂未获取到稳定店铺信息，请以地图实时搜索为准。",
-      tip: "暂未获取到稳定店铺信息，请以地图实时搜索为准。"
+      source: "poi_no_result",
+      poiFailureReason,
+      poiFailureDetail,
+      whyRecommended: message,
+      tip: message
     };
   }
   const alternatives = candidates
@@ -313,12 +344,13 @@ async function buildPoiStep(step, route, budget) {
     type: "food",
     costType: "food",
     place: primaryPoi.name,
+    name: primaryPoi.name,
     action: `去具体店铺补给：${primaryPoi.name}`,
     cost: primaryPoi.estimatedCost,
     address: primaryPoi.address,
     lat: primaryPoi.lat,
     lng: primaryPoi.lng,
-    source: "amap_poi",
+    source: primaryPoi.source,
     poiId: primaryPoi.poiId,
     amapKeyword: primaryPoi.name,
     primaryPoi: {
@@ -350,8 +382,9 @@ function poiToStep(poi, route, kind) {
     type: kind === "comfort" ? "rest" : "food",
     costType: kind === "comfort" ? "other" : "food",
     place: poi.name,
+    name: poi.name,
     action: `${label}：${poi.name}`,
-    tip: `${poi.source === "fallback_poi" ? "此处为兜底推荐，请以地图实时信息为准。" : "我为你找到的具体地点。"}${reason}`,
+    tip: `我为你找到的真实地图 POI。${reason}`,
     cost: poi.estimatedCost,
     address: poi.address,
     district: route.region || "",
@@ -361,7 +394,7 @@ function poiToStep(poi, route, kind) {
     amapKeyword: poi.name,
     openTime: "以地图实时信息为准",
     estimatedStay: kind === "comfort" ? "20-45分钟" : "15-35分钟",
-    whyRecommended: `距离当前路线点约 ${poi.distance} 米，${reason}${poi.source === "fallback_poi" ? "此处为兜底推荐，请以地图实时信息为准。" : ""}`,
+    whyRecommended: `距离当前路线点约 ${poi.distance} 米，${reason}来自地图 POI，出发前仍建议确认营业状态。`,
     source: poi.source,
     poiId: poi.poiId,
     primaryPoi: poi,
@@ -381,12 +414,12 @@ async function ensureConcretePoiSteps(route, steps, budget) {
     searchNearbyComfortStops(searchBase)
   ]);
   const withPois = [...steps];
-  const existingFood = withPois.some((step) => step.costType === "food" && (step.source === "amap_poi" || step.source === "fallback_poi"));
-  const existingConvenience = withPois.some((step) => /便利|饮品|咖啡|奶茶/.test(step.action + step.place) && (step.source === "amap_poi" || step.source === "fallback_poi"));
-  const existingComfort = withPois.some((step) => step.type === "rest" && (step.source === "amap_poi" || step.source === "fallback_poi"));
-  const foodPoi = selectBestPoiByDistanceAndBudget(foods, budget);
-  const conveniencePoi = selectBestPoiByDistanceAndBudget([...convenience, ...drinks], budget);
-  const comfortPoi = selectBestPoiByDistanceAndBudget(comfort, budget);
+  const existingFood = withPois.some((step) => step.costType === "food" && isRealPoiSource(step.source));
+  const existingConvenience = withPois.some((step) => /便利|饮品|咖啡|奶茶/.test(step.action + step.place) && isRealPoiSource(step.source));
+  const existingComfort = withPois.some((step) => step.type === "rest" && isRealPoiSource(step.source));
+  const foodPoi = selectBestPoiByDistanceAndBudget(foods.filter((poi) => isRealPoiSource(poi.source)), budget);
+  const conveniencePoi = selectBestPoiByDistanceAndBudget([...convenience, ...drinks].filter((poi) => isRealPoiSource(poi.source)), budget);
+  const comfortPoi = selectBestPoiByDistanceAndBudget(comfort.filter((poi) => isRealPoiSource(poi.source)), budget);
 
   if (!existingFood && foodPoi) withPois.push(poiToStep(foodPoi, route, "food"));
   if (!existingConvenience && conveniencePoi) withPois.push(poiToStep(conveniencePoi, route, "convenience"));
@@ -404,6 +437,13 @@ async function enhanceRouteWithMapData(route, form, startLocation) {
       : Promise.resolve(step)
   )));
   const enhancedSteps = await ensureConcretePoiSteps({ ...routeWithLocation, transport }, replacedSteps, budget);
+  const mapPoiStatus = hasRealAmapPoi({ steps: enhancedSteps })
+    ? "map_loaded"
+    : getPoiFailureReason(enhancedSteps.map((step) => ({ poiStatus: step.poiFailureReason })).filter((item) => item.poiStatus));
+  const mapPoiDetail = getPoiFailureDetail(enhancedSteps.map((step) => ({
+    poiErrorMessage: step.poiFailureDetail,
+    poiErrorCode: step.poiFailureReason
+  })).filter((item) => item.poiErrorMessage || item.poiErrorCode));
 
   return {
     ...routeWithLocation,
@@ -418,7 +458,9 @@ async function enhanceRouteWithMapData(route, form, startLocation) {
       startLabel: `识别到「${startLocation.name}」`,
       explanation: "交通费为估算值，实际以地图导航和公共交通票价为准。"
     },
-    steps: enhancedSteps
+    steps: enhancedSteps,
+    mapPoiStatus,
+    mapPoiNotice: mapPoiStatus === "map_loaded" ? "" : getAmapPoiFailureMessage(mapPoiStatus, mapPoiDetail)
   };
 }
 
@@ -1183,6 +1225,7 @@ function ResultPage({ form, results, selectedRoute, setSelectedRoute, onBack, on
   return (
     <section className="mx-auto max-w-7xl px-5 py-8 sm:px-8">
       <HeaderBar title="AI 路线结果" subtitle="不是推荐最贵的地方，而是推荐真的能执行的周末方案。" onBack={onBack} />
+      <MapDevStatus route={selectedRoute || cheapest} />
       <div className="mt-6 rounded-[28px] bg-ink p-6 text-white shadow-soft">
         <p className="text-sm font-bold text-sun">AI 决策说明</p>
         <p className="mt-3 text-lg leading-8">
@@ -1215,6 +1258,7 @@ function ResultPage({ form, results, selectedRoute, setSelectedRoute, onBack, on
 function RouteCard({ route, form, selected, onSelect }) {
   const fullText = buildCopyableRouteText(route, form);
   const placeText = buildPlaceListText(route);
+  const showPoiNotice = !hasRealAmapPoi(route) && route.mapPoiNotice;
   return (
     <article className={`rounded-[28px] border bg-white/90 p-6 shadow-soft transition ${selected ? "border-leaf ring-4 ring-mint" : "border-white/70"}`}>
       <div
@@ -1254,6 +1298,7 @@ function RouteCard({ route, form, selected, onSelect }) {
           {route.moodTradeoffNote && <p><span className="font-black text-leaf">取舍说明：</span>{route.moodTradeoffNote}</p>}
         </div>
         <p className="mt-3 rounded-2xl bg-skysoft/70 p-4 text-sm font-semibold leading-7 text-slate-700">{route.aiNote}</p>
+        {showPoiNotice && <p className="mt-3 rounded-2xl bg-sun/25 p-4 text-sm font-black leading-7 text-ink">{route.mapPoiNotice}</p>}
       </div>
       <TransitEstimateBlock estimate={route.transitEstimate} />
       <TransportPlanBlock transport={route.transport} />
@@ -1296,8 +1341,44 @@ function RouteCard({ route, form, selected, onSelect }) {
   );
 }
 
+function getCurrentDevUrl() {
+  if (typeof window === "undefined") return "";
+  return `${window.location.protocol}//${window.location.host}`;
+}
+
+function getPortNotice() {
+  if (!import.meta.env.DEV || typeof window === "undefined") return "";
+  const currentPort = window.location.port;
+  if (!currentPort) return "";
+  if (currentPort !== "5173") return `当前页面运行在 ${getCurrentDevUrl()}。如果浏览器还停在 http://127.0.0.1:5173，请切换到这个最新地址。`;
+  return "当前页面运行在 http://127.0.0.1:5173；如果终端提示 Vite 使用了新端口，请以终端最新地址为准。";
+}
+
+function MapDevStatus({ route }) {
+  if (!import.meta.env.DEV) return null;
+  const config = getAmapConfigStatus();
+  const statusText = route?.mapPoiStatus === "map_loaded"
+    ? "已配置高德 Key，正在使用真实 POI。"
+    : route?.mapPoiStatus === "poi_no_result"
+      ? "地图已加载，但附近店铺暂未获取成功，路线主体仍可参考。"
+    : route?.mapPoiStatus
+      ? getAmapPoiFailureMessage(route.mapPoiStatus)
+      : config.label;
+  const portNotice = getPortNotice();
+  return (
+    <section className="mt-6 rounded-2xl bg-white/85 p-4 text-sm font-bold leading-6 text-slate-700 shadow-soft">
+      <p><span className="text-leaf">地图状态：</span>{statusText}</p>
+      {portNotice && <p className="mt-1 text-slate-500">{portNotice}</p>}
+    </section>
+  );
+}
+
 function LocationDetails({ route }) {
-  const locationSteps = route.steps.filter((step) => step.costType !== "transport");
+  const locationSteps = route.steps.filter((step) => (
+    step.costType !== "transport"
+    && !["poi_no_result", "poi_unavailable"].includes(step.source)
+    && (step.place || step.name)
+  ));
   return (
     <section className="mt-5 rounded-2xl bg-cream/80 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1380,6 +1461,9 @@ function TransportPlanBlock({ transport }) {
         </div>
       </div>
       <p className="mt-3 text-sm font-semibold leading-6 text-white/85">{transport.transitSummary}</p>
+      {transport.routePlanningNotice && (
+        <p className="mt-2 rounded-2xl bg-white/10 p-3 text-sm font-semibold leading-6 text-white/85">{transport.routePlanningNotice}</p>
+      )}
       {transport.nearbyBusStops?.length > 0 && (
         <p className="mt-2 text-xs font-semibold leading-5 text-white/65">
           附近公交补充：{transport.nearbyBusStops.slice(0, 2).map((stop) => stop.name).join(" / ")}

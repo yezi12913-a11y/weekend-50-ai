@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { beijingStartAreaCenters } from "../data/realPlaces.js";
 import { buildAmapNavigationUrl, buildAmapSearchUrl } from "../utils/mapLinks.js";
 import { detectStartArea } from "../startArea.js";
+import { getAmapConfigStatus, getAmapPoiFailureMessage, loadAmap } from "../utils/amapClient.js";
 
 function getStartCenter(form) {
   if (Number.isFinite(form?.startLocation?.lat) && Number.isFinite(form?.startLocation?.lng)) {
@@ -15,15 +16,26 @@ function validPoint(step) {
   return step.costType !== "transport" && Number.isFinite(step.lat) && Number.isFinite(step.lng);
 }
 
-function MapPlaceholder({ route, form }) {
+function MapPlaceholder({ route, form, errorCode }) {
   const start = getStartCenter(form);
+  const config = getAmapConfigStatus();
+  const title = errorCode
+    ? getAmapPoiFailureMessage(errorCode)
+    : config.status === "missing_key"
+      ? "当前未配置高德地图 Key，无法显示真实地图。"
+      : config.status === "missing_security_code"
+        ? "当前缺少高德安全密钥，地图服务可能无法正常调用。"
+        : "地图服务暂未加载成功，当前显示为路线预览模式。";
+  const description = config.status === "configured"
+    ? "请检查控制台中的 AMap load error、PlaceSearch status/result 或 Transfer status/result。"
+    : "本地创建 `.env` 并配置 `VITE_AMAP_KEY` 和 `VITE_AMAP_SECURITY_CODE` 后，会显示真实地图、marker 和弹窗。";
   return (
     <section className="rounded-[28px] bg-white/90 p-5 shadow-soft">
       <div className="rounded-2xl bg-skysoft/80 p-5">
         <p className="text-sm font-black text-leaf">路线预览模式</p>
-        <h3 className="mt-2 text-xl font-black text-ink">真实地图需要配置高德地图 Key，当前显示为路线预览模式。</h3>
+        <h3 className="mt-2 text-xl font-black text-ink">{title}</h3>
         <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-          本地创建 `.env` 并配置 `VITE_AMAP_KEY` 和 `VITE_AMAP_SECURITY_CODE` 后，会显示真实地图、marker 和弹窗。
+          {description}
         </p>
       </div>
       <div className="mt-4 rounded-2xl bg-mint/60 p-4">
@@ -57,23 +69,15 @@ export default function RealMap({ route, form }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const [error, setError] = useState("");
-  const amapKey = import.meta.env.VITE_AMAP_KEY;
-  const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE;
   const startCenter = useMemo(() => getStartCenter(form), [form]);
   const points = useMemo(() => route?.steps?.filter(validPoint) || [], [route]);
 
   useEffect(() => {
-    if (!amapKey || !securityCode || !mapRef.current || !route) return undefined;
+    if (!mapRef.current || !route) return undefined;
 
     let disposed = false;
-    window._AMapSecurityConfig = { securityJsCode: securityCode };
 
-    import("@amap/amap-jsapi-loader")
-      .then((module) => module.default.load({
-      key: amapKey,
-      version: "2.0",
-      plugins: ["AMap.Scale", "AMap.ToolBar"]
-    }))
+    loadAmap()
       .then((AMap) => {
         if (disposed || !mapRef.current) return;
 
@@ -131,8 +135,9 @@ export default function RealMap({ route, form }) {
         mapInstanceRef.current = map;
         setError("");
       })
-      .catch(() => {
-        if (!disposed) setError("地图加载失败，当前显示为路线预览模式。");
+      .catch((loadError) => {
+        console.error("AMap load error:", loadError);
+        if (!disposed) setError(loadError?.code || "route_failed");
       });
 
     return () => {
@@ -142,9 +147,9 @@ export default function RealMap({ route, form }) {
         mapInstanceRef.current = null;
       }
     };
-  }, [amapKey, securityCode, form, points, route, startCenter]);
+  }, [form, points, route, startCenter]);
 
-  if (!amapKey || !securityCode || error) return <MapPlaceholder route={route} form={form} />;
+  if (getAmapConfigStatus().status !== "configured" || error) return <MapPlaceholder route={route} form={form} errorCode={error} />;
 
   return (
     <section className="rounded-[28px] bg-white/90 p-5 shadow-soft">

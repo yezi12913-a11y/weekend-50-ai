@@ -1,4 +1,5 @@
-import { amapGet, amapLocationToLngLat } from "./amapService.js";
+import { loadAmap } from "./amapClient.js";
+import { amapLocationToLngLat } from "./amapService.js";
 import { normalizeBeijingLocationAlias } from "../data/beijingLocationAliases.js";
 import { findFallbackLocation } from "../data/beijingFallbackPois.js";
 import { findRailwayStation } from "../data/beijingSubwayStations.js";
@@ -43,6 +44,10 @@ function hasExplicitSubwayHint(input) {
   const text = String(input || "").trim();
   if (isRailwayStationQuery(text)) return false;
   return /地铁站|地铁|站/.test(text);
+}
+
+function hasPrimaryLocalSubwayMatch(input) {
+  return /^(良乡大学城|良乡大学城站|沙河|沙河站|西土城|西土城站|五道口|五道口站|中关村|中关村站)$/.test(String(input || "").trim());
 }
 
 function stationToLocation(station, rawInput, source) {
@@ -167,6 +172,37 @@ export function getDistrictFromLocation(location) {
   return location?.district || location?.adname || "";
 }
 
+async function searchPlaceText(keyword) {
+  try {
+    const AMap = await loadAmap();
+    if (!AMap.PlaceSearch) {
+      const error = { code: "poi_failed", message: "AMap.PlaceSearch 插件没加载。" };
+      console.error("PlaceSearch failed:", "error", error);
+      return [];
+    }
+    const placeSearch = new AMap.PlaceSearch({
+      city: "北京",
+      citylimit: true,
+      pageSize: 6,
+      extensions: "all"
+    });
+    return await new Promise((resolve) => {
+      placeSearch.search(keyword, (status, result) => {
+        console.error("PlaceSearch status/result:", status, result);
+        if (status === "complete") {
+          resolve(result?.poiList?.pois || []);
+          return;
+        }
+        console.error("PlaceSearch failed:", status, result);
+        resolve([]);
+      });
+    });
+  } catch (error) {
+    if (!["missing_key", "missing_security_code"].includes(error?.code)) console.error("PlaceSearch failed:", "error", error);
+    return [];
+  }
+}
+
 export async function getLocationCandidates(input) {
   const rawInput = String(input || "").trim();
   if (!rawInput) return [];
@@ -191,16 +227,9 @@ export async function getLocationCandidates(input) {
 
   const fallback = findFallbackLocation(normalizedInput) || findFallbackLocation(rawInput);
 
-  const amapData = await amapGet("/place/text", {
-    keywords: normalizedInput,
-    city: "北京",
-    citylimit: "true",
-    extensions: "base",
-    offset: "6",
-    page: "1"
-  });
-  if (Array.isArray(amapData?.pois) && amapData.pois.length) {
-    return amapData.pois
+  const amapPois = await searchPlaceText(normalizedInput);
+  if (amapPois.length) {
+    return amapPois
       .filter((poi) => poi.location)
       .slice(0, 6)
       .map((poi) => normalizeAmapLocation(poi, rawInput));
@@ -235,7 +264,7 @@ export async function resolveStartLocation(input) {
     const railway = await resolveRailwayStation(rawInput);
     if (railway) return railway;
   }
-  if (hasExplicitSubwayHint(rawInput)) {
+  if (hasExplicitSubwayHint(rawInput) || hasPrimaryLocalSubwayMatch(rawInput)) {
     const subway = await resolveSubwayStation(rawInput);
     if (subway) return subway;
   }

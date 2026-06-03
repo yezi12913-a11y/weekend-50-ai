@@ -1,5 +1,18 @@
 import { fullBeijingSubwayStationDatabase } from "../data/beijingSubwayStations.js";
 
+const primaryLocalStationAliases = new Map([
+  ["良乡大学城", "良乡大学城站"],
+  ["良乡大学城站", "良乡大学城站"],
+  ["沙河", "沙河站"],
+  ["沙河站", "沙河站"],
+  ["西土城", "西土城站"],
+  ["西土城站", "西土城站"],
+  ["五道口", "五道口站"],
+  ["五道口站", "五道口站"],
+  ["中关村", "中关村站"],
+  ["中关村站", "中关村站"]
+]);
+
 const regionCenters = {
   海淀: { lat: 39.9766, lng: 116.3540 },
   朝阳: { lat: 39.9333, lng: 116.4617 },
@@ -31,6 +44,11 @@ export function isSubwayStationQuery(input) {
 
 export function findSubwayStationByAlias(input) {
   const normalized = normalizeStationInput(input);
+  const primaryStationName = primaryLocalStationAliases.get(normalized) || primaryLocalStationAliases.get(String(input || "").trim());
+  if (primaryStationName) {
+    const primaryStation = fullBeijingSubwayStationDatabase.find((station) => station.name === primaryStationName);
+    if (primaryStation) return primaryStation;
+  }
   return fullBeijingSubwayStationDatabase.find((station) => station.aliases.some((alias) => normalizeStationInput(alias) === normalized));
 }
 

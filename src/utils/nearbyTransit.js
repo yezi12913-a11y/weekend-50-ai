@@ -1,4 +1,5 @@
-import { amapGet, amapLocationToLngLat, distanceMeters } from "./amapService.js";
+import { loadAmap } from "./amapClient.js";
+import { amapLocationToLngLat, distanceMeters } from "./amapService.js";
 
 function normalizeTransitPoi(poi, type, origin) {
   const point = amapLocationToLngLat(poi.location);
@@ -16,16 +17,34 @@ function normalizeTransitPoi(poi, type, origin) {
 
 async function searchAround({ lat, lng, keywords, types }) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
-  const data = await amapGet("/place/around", {
-    location: `${lng},${lat}`,
-    keywords,
-    types,
-    radius: "1200",
-    sortrule: "distance",
-    offset: "8",
-    page: "1"
-  });
-  return Array.isArray(data?.pois) ? data.pois : [];
+  try {
+    const AMap = await loadAmap();
+    if (!AMap.PlaceSearch) {
+      console.error("PlaceSearch failed:", "error", { code: "poi_failed", message: "AMap.PlaceSearch 插件没加载。" });
+      return [];
+    }
+    const placeSearch = new AMap.PlaceSearch({
+      city: "北京",
+      citylimit: true,
+      pageSize: 8,
+      extensions: "all",
+      type: types
+    });
+    return await new Promise((resolve) => {
+      placeSearch.searchNearBy(keywords, [lng, lat], 1200, (status, result) => {
+        console.error("PlaceSearch status/result:", status, result);
+        if (status === "complete") {
+          resolve(result?.poiList?.pois || []);
+          return;
+        }
+        console.error("PlaceSearch failed:", status, result);
+        resolve([]);
+      });
+    });
+  } catch (error) {
+    if (!["missing_key", "missing_security_code"].includes(error?.code)) console.error("PlaceSearch failed:", "error", error);
+    return [];
+  }
 }
 
 export async function findNearbySubwayStations(lat, lng) {

@@ -20,7 +20,15 @@ VITE_AMAP_KEY=你的高德Web端Key
 VITE_AMAP_SECURITY_CODE=你的高德安全密钥
 ```
 
-如果没有配置这两个变量，页面不会白屏，会显示“真实地图需要配置高德地图 Key，当前显示为路线预览模式。”
+只使用 JS API 时，上面两个变量即可。应用会通过 `AMap.PlaceSearch`、`AMap.Geocoder`、`AMap.Transfer` 等插件查询地点和路线。
+
+如果你还申请了高德 Web服务 API Key，可以额外配置：
+
+```bash
+VITE_AMAP_WEB_SERVICE_KEY=你的高德Web服务Key
+```
+
+配置后会优先使用 Web服务 API；如果没有配置或 Web服务没有返回结果，会回退到 JS API 插件搜索。没有配置地图变量时，页面不会白屏，会显示路线预览模式。
 
 ## 常用脚本
 
@@ -37,6 +45,7 @@ npm run preview
 3. 在 Project Settings -> Environment Variables 添加：
    - `VITE_AMAP_KEY`
    - `VITE_AMAP_SECURITY_CODE`
+   - `VITE_AMAP_WEB_SERVICE_KEY`（可选，Web服务 API Key）
 4. 重新部署。
 
 ## 部署到 Cloudflare Pages
@@ -48,6 +57,7 @@ npm run preview
 5. 在 Settings -> Environment variables 添加：
    - `VITE_AMAP_KEY`
    - `VITE_AMAP_SECURITY_CODE`
+   - `VITE_AMAP_WEB_SERVICE_KEY`（可选，Web服务 API Key）
 6. 保存后重新部署。
 
 ## 原型边界
