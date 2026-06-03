@@ -34,8 +34,26 @@ function makeForm(overrides) {
   };
 }
 
-function sumStepCosts(route) {
-  return route.steps.reduce((sum, step) => sum + Number(step.cost || 0), 0);
+function routeText(route) {
+  return [
+    route.routeName,
+    route.destination,
+    route.category,
+    route.description,
+    route.weatherFit?.join(" "),
+    route.suitableFor?.join(" "),
+    route.preferenceTags?.join(" "),
+    route.aiNote,
+    route.budgetExplanation,
+    route.badWeatherAlternative,
+    ...(route.steps || []).flatMap((step) => [step.place, step.action, step.tip])
+  ].filter(Boolean).join(" ");
+}
+
+function isPureOutdoorRoute(route) {
+  const text = routeText(route);
+  return /奥森公园|玉渊潭|紫竹院|什刹海纯散步|亮马河纯散步|长时间户外|公园长时间/.test(text)
+    && !/室内|商场|书店|图书馆|咖啡|展馆|美术馆|电影院|公共区|雨天不建议长时间户外/.test(text);
 }
 
 test("budget tiers classify the requested ranges", async () => {
@@ -49,35 +67,48 @@ test("budget tiers classify the requested ranges", async () => {
 
 test("50 yuan Wudaokou scenario produces low-cost differentiated plans", async () => {
   const { generateRecommendations } = await loadAppModule();
-  const routes = await generateRecommendations(makeForm({ customBudget: "50" }));
+  const routes = generateRecommendations(makeForm({ customBudget: "50" }));
   const destinations = new Set(routes.map((route) => route.destination));
 
   assert.equal(routes.length, 3);
   assert.ok(destinations.size >= 3);
-  assert.ok(routes.every((route) => route.estimatedCost === sumStepCosts(route)));
-  assert.ok(routes.every((route) => route.estimatedCost <= 45));
-  assert.ok(routes.every((route) => route.transportCost >= 4 && route.transportCost <= 12));
-  assert.ok(routes.some((route) => ["圆明园", "颐和园", "紫竹院", "奥森公园"].includes(route.destination)));
-  assert.ok(routes[0].personalizedReason.includes("五道口"));
+  assert.ok(routes[0].estimatedCost >= 35 && routes[0].estimatedCost <= 45);
+  assert.ok(routes[1].estimatedCost >= 45 && routes[1].estimatedCost <= 55);
+  assert.ok(routes[2].estimatedCost >= 55 && routes[2].estimatedCost <= 70);
+  assert.ok(routes.some((route) => ["胡同散步", "自然放空", "安静散步", "河边夜游"].includes(route.category)));
 });
 
-test("200 yuan photo ritual scenario keeps budget accurate while allowing optional upgrades", async () => {
+test("100 yuan budget uses the normal-budget range instead of returning three low-cost plans", async () => {
   const { generateRecommendations } = await loadAppModule();
-  const routes = await generateRecommendations(makeForm({
+  const routes = generateRecommendations(makeForm({
+    customBudget: "100",
+    moods: ["想拍照", "想有一点仪式感"]
+  }));
+
+  assert.equal(routes.length, 3);
+  assert.ok(!routes.every((route) => route.estimatedCost < 70));
+  assert.ok(routes[1].estimatedCost >= 90 || routes[2].estimatedCost >= 90);
+});
+
+test("200 yuan photo ritual scenario includes visible upgraded spending", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
     customBudget: "200",
     moods: ["想有一点仪式感", "想拍照"]
   }));
 
   assert.equal(routes.length, 3);
-  assert.ok(routes.every((route) => route.estimatedCost === sumStepCosts(route)));
-  assert.ok(routes.every((route) => route.estimatedCost <= 200));
-  assert.ok(routes.some((route) => route.otherCost >= 30 || route.upgradeCost >= 30));
+  assert.ok(!routes.every((route) => route.estimatedCost < 100));
+  assert.ok(routes[0].estimatedCost >= 140);
+  assert.ok(routes[1].estimatedCost >= 170);
+  assert.ok(routes[2].estimatedCost >= 200);
+  assert.ok(routes.some((route) => route.upgradeCost >= 30));
   assert.ok(routes.some((route) => /咖啡|甜品|展|电影|正餐|文创|体验/.test(route.budgetExplanation)));
 });
 
-test("Liangxiang rainy short group scenario avoids long-distance east-side defaults", async () => {
+test("rainy group shopping and food scenario prefers indoor mall or food routes and excludes pure outdoor parks", async () => {
   const { generateRecommendations } = await loadAppModule();
-  const routes = await generateRecommendations(makeForm({
+  const routes = generateRecommendations(makeForm({
     start: "良乡大学城",
     customBudget: "50",
     time: "只想出去 2-3 小时",
@@ -88,29 +119,47 @@ test("Liangxiang rainy short group scenario avoids long-distance east-side defau
   }));
 
   assert.equal(routes.length, 3);
-  assert.notEqual(routes[0].destination, "三里屯");
-  assert.notEqual(routes[0].destination, "798");
-  assert.ok(routes[0].trafficPressure !== "高");
-  assert.ok(routes.some((route) => route.weatherFit.includes("雨天")));
+  routes.forEach((route) => {
+    assert.equal(isPureOutdoorRoute(route), false, route.routeName);
+    assert.ok(/合生汇|大悦城|荟聚|商场|美食|牛街|护国寺|室内|咖啡|展馆/.test(routeText(route)), route.routeName);
+  });
 });
 
-test("different start locations prioritize different nearby destinations", async () => {
+test("rainy indoor need excludes long pure outdoor park routes", async () => {
   const { generateRecommendations } = await loadAppModule();
-  const wudaokou = await generateRecommendations(makeForm({ start: "五道口", customBudget: "50" }));
-  const qianmen = await generateRecommendations(makeForm({ start: "前门", customBudget: "50" }));
-  const chaoyang = await generateRecommendations(makeForm({ start: "三里屯", customBudget: "50" }));
-  const tongzhou = await generateRecommendations(makeForm({ start: "通州北苑", customBudget: "50" }));
+  const routes = generateRecommendations(makeForm({
+    customBudget: "80",
+    activities: ["雨天室内"],
+    weather: "雨天",
+    moods: ["想找室内地方"]
+  }));
 
-  assert.ok(wudaokou.some((route) => ["圆明园", "颐和园", "紫竹院"].includes(route.destination)));
-  assert.ok(qianmen.some((route) => ["前门", "鼓楼/什刹海", "护国寺"].includes(route.destination)));
-  assert.ok(chaoyang.some((route) => ["朝阳公园", "亮马河", "蓝色港湾", "三里屯"].includes(route.destination)));
-  assert.ok(tongzhou.some((route) => route.destination === "通州运河"));
-  assert.notDeepEqual(wudaokou.map((route) => route.destination), tongzhou.map((route) => route.destination));
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => {
+    assert.equal(isPureOutdoorRoute(route), false, route.routeName);
+    assert.ok(!/奥森公园|紫竹院|玉渊潭/.test(route.destination), route.routeName);
+  });
 });
 
-test("300 yuan full-day group scenario keeps upgrades explicit and budget-derived", async () => {
+test("group lively need excludes library, quiet study, and solo routes", async () => {
   const { generateRecommendations } = await loadAppModule();
-  const routes = await generateRecommendations(makeForm({
+  const routes = generateRecommendations(makeForm({
+    customBudget: "80",
+    activities: ["朋友社交", "吃东西"],
+    companion: "多人",
+    moods: ["想和朋友热闹一点"]
+  }));
+
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => {
+    assert.ok(!/图书馆|安静学习|一个人独处/.test(routeText(route)), route.routeName);
+    assert.ok(/合生汇|三里屯|大悦城|牛街|护国寺|蓝色港湾|商场|美食|亮马河/.test(routeText(route)), route.routeName);
+  });
+});
+
+test("300 yuan full-day group scenario creates a clear upgrade plan", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
     start: "学校东门",
     customBudget: "300",
     time: "一天",
@@ -120,8 +169,55 @@ test("300 yuan full-day group scenario keeps upgrades explicit and budget-derive
   }));
 
   assert.equal(routes.length, 3);
-  assert.ok(routes.every((route) => route.estimatedCost === sumStepCosts(route)));
-  assert.ok(routes.every((route) => route.estimatedCost <= 300));
-  assert.ok(routes.some((route) => route.otherCost >= 45 || route.upgradeCost >= 45));
+  assert.ok(routes[0].estimatedCost >= 120);
+  assert.ok(routes[1].estimatedCost >= 190);
+  assert.ok(routes[2].estimatedCost >= 240);
+  assert.ok(routes[2].upgradeCost >= 45);
   assert.ok(routes[2].steps.length >= routes[0].steps.length);
+});
+
+test("specific destinations keep all three plans within the selected destination group", async () => {
+  const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
+  const destinations = ["合生汇", "三里屯", "798"];
+
+  destinations.forEach((destination) => {
+    const routes = generateRecommendations(makeForm({ destination }));
+
+    assert.equal(routes.length, 3, destination);
+    routes.forEach((route) => {
+      assert.ok(
+        isRouteRelatedToDestination(route, destination),
+        `${destination} should not recommend unrelated route ${route.destination}`
+      );
+    });
+  });
+});
+
+test("unspecified destination can still recommend different destinations", async () => {
+  const { generateRecommendations, isSpecificDestination } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({ destination: "不指定，让 AI 推荐" }));
+  const destinations = new Set(routes.map((route) => route.destination));
+
+  assert.equal(isSpecificDestination("不指定，让 AI 推荐"), false);
+  assert.equal(routes.length, 3);
+  assert.ok(destinations.size >= 3);
+});
+
+test("unspecified AI recommendation still obeys rainy group lively constraints", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    customBudget: "100",
+    activities: ["逛街", "吃东西"],
+    destination: "不指定，让 AI 推荐",
+    weather: "雨天",
+    companion: "多人",
+    moods: ["想和朋友热闹一点", "想吃点好的"]
+  }));
+
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => {
+    assert.equal(isPureOutdoorRoute(route), false, route.routeName);
+    assert.ok(route.estimatedCost >= 70 || route.planType.includes("方案 A"), route.routeName);
+    assert.ok(!/图书馆|安静学习|一个人独处/.test(routeText(route)), route.routeName);
+  });
 });

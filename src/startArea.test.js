@@ -41,6 +41,25 @@ test("keeps long station names preferred over shorter partial matches", () => {
   assert.equal(detectStartLocation("北京大学东门站").matchedStation, "北京大学东门");
 });
 
+test("resolves Beijing university names and campuses to nearby subway and bus stations", () => {
+  const cases = [
+    ["北大", "北京大学东门", "中关园公交站"],
+    ["清华大学", "清华东路西口", "清华大学西门公交站"],
+    ["北京工商大学良乡校区", "良乡大学城", "良乡大学城公交站"],
+    ["北京邮电大学西土城校区", "蓟门桥", "明光桥北公交站"],
+    ["中央财经大学沙河校区", "沙河高教园", "央财沙河校区公交站"],
+    ["中国政法大学昌平校区", "昌平", "中国政法大学昌平校区公交站"]
+  ];
+
+  cases.forEach(([input, station, busStop]) => {
+    const result = detectStartLocation(input);
+    assert.equal(result.confidence, "university", input);
+    assert.ok(result.matchedStation.includes(station), input);
+    assert.ok(result.nearbyBusStops.includes(busStop), input);
+    assert.match(result.debugText, /附近地铁|附近公交/, input);
+  });
+});
+
 test("falls back to area keywords without blocking ordinary place text", () => {
   assert.equal(detectStartArea("学校东门"), "通用区域");
   assert.equal(detectStartLocation("学校东门").confidence, "unknown");

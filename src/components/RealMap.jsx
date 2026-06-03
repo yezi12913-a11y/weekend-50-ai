@@ -1,41 +1,65 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { beijingStartAreaCenters } from "../data/realPlaces.js";
-import { buildAmapNavigationUrl, buildAmapSearchUrl } from "../utils/mapLinks.js";
 import { detectStartArea } from "../startArea.js";
-import { getAmapConfigStatus, getAmapPoiFailureMessage, loadAmap } from "../utils/amapClient.js";
+import { hasAmapBrowserConfig, loadAmapJsApi } from "../utils/amapClient.js";
+import { buildAmapNavigationUrl, buildAmapSearchUrl } from "../utils/mapLinks.js";
+
+const areaCenters = {
+  "海淀高校区": { name: "海淀高校区", lat: 39.9929, lng: 116.3103 },
+  "朝阳/东部区域": { name: "朝阳/东部区域", lat: 39.9219, lng: 116.4855 },
+  "城区交通便利区域": { name: "城区交通便利区域", lat: 39.9042, lng: 116.4074 },
+  "南部/良乡区域": { name: "南部/良乡区域", lat: 39.7232, lng: 116.1777 },
+  "北部/昌平区域": { name: "北部/昌平区域", lat: 40.0926, lng: 116.2996 },
+  "通用区域": { name: "北京市", lat: 39.9042, lng: 116.4074 }
+};
+
+const destinationCenters = {
+  合生汇: { lat: 39.8936, lng: 116.4898 },
+  三里屯: { lat: 39.9367, lng: 116.4540 },
+  朝阳大悦城: { lat: 39.9247, lng: 116.5196 },
+  西单大悦城: { lat: 39.9098, lng: 116.3746 },
+  荟聚: { lat: 39.7894, lng: 116.3285 },
+  蓝色港湾: { lat: 39.9483, lng: 116.4747 },
+  "鼓楼/什刹海": { lat: 39.9403, lng: 116.3868 },
+  什刹海: { lat: 39.9403, lng: 116.3868 },
+  奥森公园: { lat: 40.0162, lng: 116.3929 },
+  亮马河: { lat: 39.9494, lng: 116.4708 },
+  紫竹院: { lat: 39.9486, lng: 116.3127 },
+  玉渊潭: { lat: 39.9170, lng: 116.3175 },
+  798: { lat: 39.9843, lng: 116.4976 },
+  首钢园: { lat: 39.9137, lng: 116.1606 },
+  牛街: { lat: 39.8863, lng: 116.3637 },
+  护国寺: { lat: 39.9333, lng: 116.3738 },
+  书店: { lat: 39.9042, lng: 116.4074 },
+  图书馆: { lat: 39.9431, lng: 116.3252 },
+  咖啡店: { lat: 39.9042, lng: 116.4074 },
+  商场公共区: { lat: 39.9042, lng: 116.4074 }
+};
 
 function getStartCenter(form) {
-  if (Number.isFinite(form?.startLocation?.lat) && Number.isFinite(form?.startLocation?.lng)) {
-    return { name: form.startLocation.name || form.start || "出发地", lat: form.startLocation.lat, lng: form.startLocation.lng };
-  }
   const area = detectStartArea(form?.start || "");
-  return beijingStartAreaCenters[area] || beijingStartAreaCenters["通用区域"];
+  return areaCenters[area] || areaCenters["通用区域"];
 }
 
-function validPoint(step) {
-  return step.costType !== "transport" && Number.isFinite(step.lat) && Number.isFinite(step.lng);
+function pointForStep(step, route, index) {
+  if (Number.isFinite(step.lat) && Number.isFinite(step.lng)) return step;
+  const base = destinationCenters[step.place] || destinationCenters[route?.destination] || areaCenters["通用区域"];
+  return {
+    ...step,
+    lat: base.lat + index * 0.0012,
+    lng: base.lng + index * 0.0012,
+    amapKeyword: step.amapKeyword || `${route?.destination || "北京"} ${step.place}`
+  };
 }
 
-function MapPlaceholder({ route, form, errorCode }) {
+function MapPlaceholder({ route, form }) {
   const start = getStartCenter(form);
-  const config = getAmapConfigStatus();
-  const title = errorCode
-    ? getAmapPoiFailureMessage(errorCode)
-    : config.status === "missing_key"
-      ? "当前未配置高德地图 Key，无法显示真实地图。"
-      : config.status === "missing_security_code"
-        ? "当前缺少高德安全密钥，地图服务可能无法正常调用。"
-        : "地图服务暂未加载成功，当前显示为路线预览模式。";
-  const description = config.status === "configured"
-    ? "请检查控制台中的 AMap load error、PlaceSearch status/result 或 Transfer status/result。"
-    : "本地创建 `.env` 并配置 `VITE_AMAP_KEY` 和 `VITE_AMAP_SECURITY_CODE` 后，会显示真实地图、marker 和弹窗。";
   return (
     <section className="rounded-[28px] bg-white/90 p-5 shadow-soft">
       <div className="rounded-2xl bg-skysoft/80 p-5">
         <p className="text-sm font-black text-leaf">路线预览模式</p>
-        <h3 className="mt-2 text-xl font-black text-ink">{title}</h3>
+        <h3 className="mt-2 text-xl font-black text-ink">真实地图需要配置高德地图 Key，当前显示为路线预览模式。</h3>
         <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-          {description}
+          Cloudflare Pages 配置 `VITE_AMAP_KEY` 和 `VITE_AMAP_SECURITY_CODE` 后，会显示真实地图、marker 和弹窗。
         </p>
       </div>
       <div className="mt-4 rounded-2xl bg-mint/60 p-4">
@@ -43,9 +67,9 @@ function MapPlaceholder({ route, form, errorCode }) {
         <p className="mt-1 font-black text-ink">{form?.start || start.name}</p>
       </div>
       <div className="mt-4 space-y-3">
-        {route?.steps?.filter((step) => step.costType !== "transport").map((step) => (
+        {route?.steps?.map((step, index) => (
           <a
-            key={step.id}
+            key={`${step.place}-${index}`}
             href={buildAmapNavigationUrl(step)}
             target="_blank"
             rel="noreferrer"
@@ -54,9 +78,9 @@ function MapPlaceholder({ route, form, errorCode }) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-black text-ink">{step.place}</p>
-                <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{step.address}</p>
+                <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{step.action}</p>
               </div>
-              <span className="shrink-0 rounded-full bg-ink px-3 py-2 text-xs font-black text-white">打开地图</span>
+              <span className="shrink-0 rounded-full bg-ink px-3 py-2 text-xs font-black text-white">打开高德地图导航</span>
             </div>
           </a>
         ))}
@@ -70,40 +94,30 @@ export default function RealMap({ route, form }) {
   const mapInstanceRef = useRef(null);
   const [error, setError] = useState("");
   const startCenter = useMemo(() => getStartCenter(form), [form]);
-  const points = useMemo(() => route?.steps?.filter(validPoint) || [], [route]);
+  const points = useMemo(() => route?.steps?.map((step, index) => pointForStep(step, route, index)) || [], [route]);
 
   useEffect(() => {
-    if (!mapRef.current || !route) return undefined;
+    if (!hasAmapBrowserConfig() || !mapRef.current || !route) return undefined;
 
     let disposed = false;
-
-    loadAmap()
+    loadAmapJsApi()
       .then((AMap) => {
         if (disposed || !mapRef.current) return;
-
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.destroy();
-          mapInstanceRef.current = null;
-        }
+        if (mapInstanceRef.current) mapInstanceRef.current.destroy();
 
         const center = points[0] ? [points[0].lng, points[0].lat] : [startCenter.lng, startCenter.lat];
-        const map = new AMap.Map(mapRef.current, {
-          center,
-          zoom: 12,
-          viewMode: "2D"
-        });
-
+        const map = new AMap.Map(mapRef.current, { center, zoom: 12, viewMode: "2D" });
         map.addControl(new AMap.Scale());
         map.addControl(new AMap.ToolBar({ position: "RB" }));
 
-        const markers = [];
-        const startMarker = new AMap.Marker({
-          position: [startCenter.lng, startCenter.lat],
-          title: form?.start || startCenter.name,
-          content: '<div class="amap-custom-marker amap-start-marker">起</div>'
-        });
-        map.add(startMarker);
-        markers.push(startMarker);
+        const markers = [
+          new AMap.Marker({
+            position: [startCenter.lng, startCenter.lat],
+            title: form?.start || startCenter.name,
+            content: '<div class="amap-custom-marker amap-start-marker">起</div>'
+          })
+        ];
+        map.add(markers[0]);
 
         points.forEach((step, index) => {
           const marker = new AMap.Marker({
@@ -111,21 +125,18 @@ export default function RealMap({ route, form }) {
             title: step.place,
             content: `<div class="amap-custom-marker">${index + 1}</div>`
           });
-
           const infoWindow = new AMap.InfoWindow({
             offset: new AMap.Pixel(0, -28),
             content: `
               <div class="amap-info-card">
                 <strong>${step.place}</strong>
-                <p>${step.address}</p>
-                <p>最近地铁：${step.nearestSubway}</p>
+                <p>${step.action}</p>
                 <p>预计消费：${step.cost}元</p>
-                <p>${step.whyRecommended || step.tip}</p>
+                <p>${step.tip || route.whyRecommended}</p>
                 <a href="${buildAmapNavigationUrl(step)}" target="_blank" rel="noreferrer">打开高德地图导航</a>
               </div>
             `
           });
-
           marker.on("click", () => infoWindow.open(map, marker.getPosition()));
           map.add(marker);
           markers.push(marker);
@@ -135,9 +146,8 @@ export default function RealMap({ route, form }) {
         mapInstanceRef.current = map;
         setError("");
       })
-      .catch((loadError) => {
-        console.error("AMap load error:", loadError);
-        if (!disposed) setError(loadError?.code || "route_failed");
+      .catch(() => {
+        if (!disposed) setError("地图加载失败，当前显示为路线预览模式。");
       });
 
     return () => {
@@ -149,7 +159,7 @@ export default function RealMap({ route, form }) {
     };
   }, [form, points, route, startCenter]);
 
-  if (getAmapConfigStatus().status !== "configured" || error) return <MapPlaceholder route={route} form={form} errorCode={error} />;
+  if (!hasAmapBrowserConfig() || error) return <MapPlaceholder route={route} form={form} />;
 
   return (
     <section className="rounded-[28px] bg-white/90 p-5 shadow-soft">
@@ -168,7 +178,7 @@ export default function RealMap({ route, form }) {
         </a>
       </div>
       <div ref={mapRef} className="h-[360px] w-full overflow-hidden rounded-2xl bg-slate-100 sm:h-[420px]" />
-      <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">点击地图 marker 可查看地点名称、地址、预计消费和推荐理由。导航以高德地图实际路线为准。</p>
+      <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">点击地图 marker 可查看地点名称、预计消费和推荐理由。导航以高德地图实际路线为准。</p>
     </section>
   );
 }

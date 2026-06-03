@@ -1,21 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { aiActivityOption, formatActivities, getEffectiveActivities, toggleActivity } from "./activityPreference.js";
-import CopyRouteButton from "./components/CopyRouteButton.jsx";
 import RealMap from "./components/RealMap.jsx";
 import { getDestinationTransitInfo } from "./data/destinationTransitMap.js";
-import { routesData } from "./data/routeTemplates.js";
 import { keepUnspecifiedDestinationLast } from "./destinationOptions.js";
 import { detectStartArea, detectStartInfo } from "./startArea.js";
 import { formatTimePreference, isRouteTimeFit, timePreferenceLabelForAi } from "./timePreference.js";
 import { estimateTransitCost } from "./transitEstimate.js";
-import { attachBudgetSummary, calculateRouteBudget } from "./utils/budget.js";
-import { resolveStartLocation } from "./utils/locationResolver.js";
-import { buildAmapNavigationUrl, buildAmapSearchUrl, buildCopyableRouteText, buildPlaceListText } from "./utils/mapLinks.js";
-import { findNearbyBusStops, findNearbySubwayStations } from "./utils/nearbyTransit.js";
-import { searchNearbyBudgetFood, searchNearbyComfortStops, searchNearbyConvenienceStores, searchNearbyDrinkShops, selectBestPoiByDistanceAndBudget } from "./utils/poiSearch.js";
-import { sortRoutesForUser } from "./utils/recommendationScoring.js";
-import { planTransitRoute } from "./utils/transitPlanner.js";
-import { AMAP_KEY_ERROR_CODES, getAmapConfigStatus, getAmapPoiFailureMessage } from "./utils/amapClient.js";
+import { buildAmapNavigationUrl } from "./utils/mapLinks.js";
+import { resolveRoutePois } from "./utils/routePoiResolver.js";
 
 const activityOptions = [
   "逛街",
@@ -61,6 +53,537 @@ const destinationOptions = {
   朋友社交: ["合生汇", "三里屯", "朝阳大悦城", "牛街", "西单商圈", "亮马河", "不指定，让 AI 推荐"]
 };
 
+const nonspecificDestinations = new Set([
+  "",
+  "未选择",
+  "不指定，让 AI 推荐",
+  "离我近一点",
+  "最省钱",
+  "适合拍照",
+  "适合吃东西",
+  "适合雨天",
+  "适合放空",
+  "人少一点",
+  "交通别太折腾"
+]);
+
+const destinationGroups = {
+  合生汇: ["合生汇", "合生汇 B1", "九龙山", "大郊亭", "商场美食区"],
+  三里屯: ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆", "亮马河", "蓝色港湾"],
+  朝阳大悦城: ["朝阳大悦城", "青年路", "朝阳", "商场美食区"],
+  西单大悦城: ["西单大悦城", "西单", "西单商圈"],
+  荟聚: ["荟聚", "西红门"],
+  蓝色港湾: ["蓝色港湾", "亮马河", "枣营", "亮马桥"],
+  大悦春风里: ["大悦春风里", "大兴新城", "黄村西大街"],
+  奥森公园: ["奥森公园", "森林公园南门", "奥林匹克公园"],
+  什刹海: ["什刹海", "鼓楼", "烟袋斜街", "南锣鼓巷", "北海北"],
+  "鼓楼/什刹海": ["什刹海", "鼓楼", "烟袋斜街", "南锣鼓巷", "北海北"],
+  亮马河: ["亮马河", "亮马桥", "农业展览馆", "蓝色港湾", "枣营"],
+  玉渊潭: ["玉渊潭", "军事博物馆", "公主坟"],
+  紫竹院: ["紫竹院", "国家图书馆", "白石桥南"],
+  朝阳公园: ["朝阳公园", "枣营", "东风北桥"],
+  北海公园周边: ["北海公园周边", "北海北", "平安里", "护国寺"],
+  798: ["798", "酒仙桥", "将台", "望京南", "高家园", "UCCA"],
+  首钢园: ["首钢园", "金安桥", "北辛安", "石景山"],
+  五道营胡同: ["五道营胡同", "雍和宫", "北新桥"],
+  今日美术馆: ["今日美术馆", "百子湾", "大望路", "美术馆"],
+  国家典籍博物馆: ["国家典籍博物馆", "国家图书馆", "白石桥南", "图书馆"],
+  中国电影博物馆: ["中国电影博物馆", "南皋", "将台", "展馆"],
+  北京时代美术馆: ["北京时代美术馆", "五棵松", "美术馆"],
+  "UCCA 周边": ["UCCA 周边", "UCCA", "798", "酒仙桥", "将台"],
+  牛街: ["牛街", "广安门内", "白广路", "菜市口"],
+  护国寺: ["护国寺", "平安里", "新街口", "北海北"],
+  "合生汇 B1": ["合生汇", "合生汇 B1", "九龙山", "大郊亭", "商场美食区"],
+  西单商圈: ["西单大悦城", "西单", "西单商圈"],
+  簋街: ["簋街", "东直门", "北新桥"],
+  商场美食区: ["商场美食区", "合生汇", "合生汇 B1", "朝阳大悦城", "西单大悦城", "西单商圈"],
+  书店: ["书店", "图书馆", "咖啡店", "商场公共区"],
+  图书馆: ["图书馆", "国家图书馆", "书店", "校园周边安静空间"],
+  咖啡店: ["咖啡店", "书店", "商场公共区"],
+  商场公共区: ["商场公共区", "商场美食区", "书店", "合生汇", "朝阳大悦城", "西单大悦城"],
+  校园周边安静空间: ["校园周边安静空间", "图书馆", "书店", "咖啡店"]
+};
+
+const indoorNeedWeathers = new Set(["雨天", "太热", "太冷"]);
+const indoorNeedMoods = new Set(["想找室内地方"]);
+const socialMoods = new Set(["想和朋友热闹一点"]);
+const quietSoloWords = ["图书馆", "安静学习", "一个人独处"];
+const indoorWords = ["合生汇", "朝阳大悦城", "西单大悦城", "荟聚", "商场", "美食区", "书店", "图书馆", "咖啡", "展馆", "美术馆", "电影院", "公共区", "雨天室内", "室内"];
+const socialWords = ["合生汇", "三里屯", "朝阳大悦城", "西单大悦城", "牛街", "护国寺", "蓝色港湾", "商场", "商圈", "美食区", "小吃街", "夜景", "亮马河", "朋友社交"];
+const pureOutdoorWords = ["奥森公园", "玉渊潭", "紫竹院", "什刹海", "亮马河", "公园长时间", "长时间户外"];
+const exhibitionWords = ["798", "UCCA", "今日美术馆", "国家典籍博物馆", "中国电影博物馆", "北京时代美术馆", "美术馆", "展馆", "看展"];
+const shoppingWords = ["合生汇", "三里屯", "朝阳大悦城", "西单大悦城", "荟聚", "蓝色港湾", "商圈", "商场", "商业街"];
+const foodWords = ["牛街", "护国寺", "合生汇 B1", "西单", "商场美食区", "美食", "小吃", "吃东西", "餐饮", "正餐", "简餐", "甜品", "咖啡"];
+const quietStudyWords = ["书店", "图书馆", "咖啡店", "商场公共区", "安静学习", "校园周边安静空间"];
+
+const routesData = [
+  {
+    routeId: "hopson",
+    routeName: "合生汇低预算逛吃路线",
+    category: "商场逛吃",
+    destination: "合生汇",
+    suitableFor: ["逛街", "吃东西", "雨天室内", "朋友社交"],
+    budgetRange: [50, 100],
+    weatherFit: ["雨天", "太热", "太冷", "不确定"],
+    companionFit: ["独自", "双人", "多人"],
+    startAreaFit: ["朝阳/东部区域", "城区交通便利区域", "通用区域"],
+    preferenceTags: ["逛街", "吃东西", "雨天室内", "朋友社交", "想吃点好的", "想聊天"],
+    estimatedCost: 58,
+    transportCost: 10,
+    foodCost: 36,
+    activityCost: 0,
+    flexibleCost: 12,
+    timeNeeded: "半天",
+    transportTime: 35,
+    trafficPressure: "中",
+    description: "这条路线适合想逛街但不想被消费绑架的同学。合生汇的优点是室内空间大、吃的选择多，预算可以被控制在 B1 简餐、便利店饮品和免费公共区停留里。",
+    steps: [
+      { place: "合生汇 B1", action: "先看平价小吃和简餐，不急着坐进正餐店", cost: 30, tip: "先定餐饮上限，能防止预算失控。" },
+      { place: "商场公共区", action: "逛店、聊天、找座位休息", cost: 0, tip: "把商场当免费公共空间，不强制购物。" },
+      { place: "周边街区", action: "天气好就短距离散步拍照", cost: 0, tip: "雨天直接取消户外段。" }
+    ],
+    savingTip: "不要把路线设计成奶茶 + 正餐 + 甜品，保留一个消费点就够。",
+    riskTip: "周末饭点人会多，如果想安静，建议错开 12:00 和 18:00。",
+    upgradeOption: "预算到 80 元时，可以加一杯咖啡或换成更舒服的轻餐。",
+    badWeatherAlternative: "下雨时保留全室内动线，改成商场 + 书店 + B1 简餐。",
+    whyRecommended: "它把吃饭、休息、逛街都放在一个空间里，交通和天气风险比较小。"
+  },
+  {
+    routeId: "sanlitun",
+    routeName: "三里屯橱窗漫游路线",
+    category: "城市漫游",
+    destination: "三里屯",
+    suitableFor: ["逛街", "拍照打卡", "低预算约会", "朋友社交"],
+    budgetRange: [50, 100],
+    weatherFit: ["晴天", "晚上", "不确定"],
+    companionFit: ["双人", "多人"],
+    startAreaFit: ["朝阳/东部区域", "城区交通便利区域"],
+    preferenceTags: ["逛街", "拍照打卡", "想拍照", "想聊天", "想有一点仪式感"],
+    estimatedCost: 65,
+    transportCost: 12,
+    foodCost: 38,
+    activityCost: 0,
+    flexibleCost: 15,
+    timeNeeded: "晚上",
+    transportTime: 40,
+    trafficPressure: "中",
+    description: "这不是购物路线，而是把三里屯当作免费的城市观察和拍照空间。适合想有一点仪式感，但预算又不想被商圈拉高的人。",
+    steps: [
+      { place: "三里屯太古里外街", action: "看橱窗、拍街景、边走边聊", cost: 0, tip: "只逛不买，预算会很稳。" },
+      { place: "周边平价餐饮", action: "选择小吃或简餐", cost: 38, tip: "先避开网红正餐店。" },
+      { place: "亮马河方向", action: "晚间散步，补一点氛围感", cost: 0, tip: "双人出行更适合这段。" }
+    ],
+    savingTip: "把消费限定在一顿简餐，不买饮品和甜品。",
+    riskTip: "夜间人流密集，独自出行要优先走主路。",
+    upgradeOption: "预算到 100 元时，可以加一杯咖啡作为停留点。",
+    badWeatherAlternative: "下雨时改成三里屯室内店铺 + 商场公共区，不安排亮马河。",
+    whyRecommended: "它提供了低消费也能获得城市氛围的方案。"
+  },
+  {
+    routeId: "joycity-chaoyang",
+    routeName: "朝阳大悦城室内放松路线",
+    category: "室内放松",
+    destination: "朝阳大悦城",
+    suitableFor: ["雨天室内", "逛街", "朋友社交", "吃东西"],
+    budgetRange: [50, 80],
+    weatherFit: ["雨天", "太热", "太冷"],
+    companionFit: ["独自", "双人", "多人"],
+    startAreaFit: ["朝阳/东部区域", "通用区域"],
+    preferenceTags: ["雨天室内", "朋友社交", "想随便走走", "想吃点好的"],
+    estimatedCost: 55,
+    transportCost: 10,
+    foodCost: 32,
+    activityCost: 0,
+    flexibleCost: 13,
+    timeNeeded: "半天",
+    transportTime: 38,
+    trafficPressure: "中",
+    description: "适合天气不好但又不想窝在宿舍的周末。它的价值是稳定：吃饭、休息、逛店都在室内，预算靠选择平价餐饮来控制。",
+    steps: [
+      { place: "朝阳大悦城", action: "先找公共休息区和低价餐饮", cost: 0, tip: "把路线设计成低消费停留。" },
+      { place: "美食区", action: "选择简餐或小吃", cost: 32, tip: "多人可以分开买，别被套餐绑住。" },
+      { place: "店铺动线", action: "逛文创、服饰和生活方式店", cost: 0, tip: "适合边逛边聊天。" }
+    ],
+    savingTip: "先吃饭再逛，能减少被饮品甜品吸引的概率。",
+    riskTip: "周末下午客流大，容易找不到座位。",
+    upgradeOption: "预算到 80 元时，可以增加饮品或小甜点。",
+    badWeatherAlternative: "本身就是坏天气替代路线，可作为其他户外路线备选。",
+    whyRecommended: "它把天气风险降到最低，适合课堂验证里说的'真的能去'。"
+  },
+  {
+    routeId: "xidan",
+    routeName: "西单大悦城 + 西单商圈路线",
+    category: "城区商圈",
+    destination: "西单大悦城",
+    suitableFor: ["逛街", "吃东西", "朋友社交"],
+    budgetRange: [50, 100],
+    weatherFit: ["雨天", "太热", "太冷", "不确定"],
+    companionFit: ["双人", "多人"],
+    startAreaFit: ["城区交通便利区域", "海淀高校区", "通用区域"],
+    preferenceTags: ["逛街", "吃东西", "朋友社交", "想聊天"],
+    estimatedCost: 62,
+    transportCost: 10,
+    foodCost: 40,
+    activityCost: 0,
+    flexibleCost: 12,
+    timeNeeded: "半天",
+    transportTime: 35,
+    trafficPressure: "中",
+    description: "西单适合想要选择多、集合方便的多人出行。它不是最低价路线，但预算透明，适合作为朋友之间的稳妥方案。",
+    steps: [
+      { place: "西单地铁站", action: "集合后直接进商圈", cost: 0, tip: "集合点比胡同路线更明确。" },
+      { place: "西单大悦城", action: "逛店、看公共展陈、找平价餐饮", cost: 40, tip: "多人出行先统一预算。" },
+      { place: "周边街区", action: "短距离城市漫游", cost: 0, tip: "天气差就不出商场。" }
+    ],
+    savingTip: "多人一起时，先约定'只吃一顿饭，不临时加项目'。",
+    riskTip: "周末商圈拥挤，不适合想彻底安静放空的人。",
+    upgradeOption: "预算到 100 元时，可以加入电影或正式餐。",
+    badWeatherAlternative: "下雨时路线完整保留，减少户外段。",
+    whyRecommended: "城区交通便利，适合不同学校的同学汇合。"
+  },
+  {
+    routeId: "livat",
+    routeName: "荟聚低预算室内路线",
+    category: "大型商场",
+    destination: "荟聚",
+    suitableFor: ["雨天室内", "逛街", "吃东西", "朋友社交"],
+    budgetRange: [50, 100],
+    weatherFit: ["雨天", "太热", "太冷"],
+    companionFit: ["多人", "双人"],
+    startAreaFit: ["房山/良乡区域", "城区交通便利区域", "通用区域"],
+    preferenceTags: ["逛街", "吃东西", "朋友社交", "雨天室内"],
+    estimatedCost: 60,
+    transportCost: 12,
+    foodCost: 35,
+    activityCost: 0,
+    flexibleCost: 13,
+    timeNeeded: "半天",
+    transportTime: 45,
+    trafficPressure: "中",
+    description: "荟聚适合多人低预算室内活动，空间大、选择多、不需要额外门票。它更像一个安全牌：不惊艳，但很难踩雷。",
+    steps: [
+      { place: "荟聚入口区", action: "集合并确认预算上限", cost: 0, tip: "多人先定规则。" },
+      { place: "餐饮区", action: "选择简餐、拼小吃或平价套餐", cost: 35, tip: "多人可以共享几样小吃。" },
+      { place: "家居/生活方式区", action: "边逛边聊，减少消费压力", cost: 0, tip: "逛宜家式空间也能消磨时间。" }
+    ],
+    savingTip: "不要在每个人都买饮品的情况下再加甜品。",
+    riskTip: "从北部高校区过去可能时间偏长。",
+    upgradeOption: "预算到 100 元时，可以加入正式餐或小型体验项目。",
+    badWeatherAlternative: "全室内路线，适合作为雨天备选。",
+    whyRecommended: "它对多人、雨天、低预算都比较友好。"
+  },
+  {
+    routeId: "solana",
+    routeName: "蓝色港湾夜景散步路线",
+    category: "夜景约会",
+    destination: "蓝色港湾",
+    suitableFor: ["拍照打卡", "低预算约会", "散步放空"],
+    budgetRange: [50, 100],
+    weatherFit: ["晴天", "晚上", "不确定"],
+    companionFit: ["双人", "独自"],
+    startAreaFit: ["朝阳/东部区域", "城区交通便利区域"],
+    preferenceTags: ["拍照打卡", "低预算约会", "想拍照", "想有一点仪式感", "想聊天"],
+    estimatedCost: 58,
+    transportCost: 12,
+    foodCost: 30,
+    activityCost: 0,
+    flexibleCost: 16,
+    timeNeeded: "晚上",
+    transportTime: 42,
+    trafficPressure: "中",
+    description: "这条路线适合想要氛围感但不想花很多钱的双人出行。核心不是消费，而是夜景、灯光和可散步的空间。",
+    steps: [
+      { place: "蓝色港湾", action: "看夜景和橱窗，拍照", cost: 0, tip: "晚上更有氛围。" },
+      { place: "周边平价餐饮", action: "吃简餐或小食", cost: 30, tip: "避开高价餐厅。" },
+      { place: "亮马河方向", action: "短距离散步聊天", cost: 0, tip: "适合双人慢节奏。" }
+    ],
+    savingTip: "把'约会感'放在路线和环境上，而不是消费上。",
+    riskTip: "天气太冷或大风时体验会下降。",
+    upgradeOption: "预算到 100 元时，可以加咖啡或甜点作为停留点。",
+    badWeatherAlternative: "下雨时改成朝阳大悦城或合生汇室内路线。",
+    whyRecommended: "它能用较低成本制造周末出门的仪式感。"
+  },
+  {
+    routeId: "shichahai",
+    routeName: "什刹海 + 鼓楼胡同散步路线",
+    category: "胡同散步",
+    destination: "鼓楼/什刹海",
+    suitableFor: ["散步放空", "拍照打卡", "低预算约会", "一个人独处"],
+    budgetRange: [30, 80],
+    weatherFit: ["晴天", "不确定"],
+    companionFit: ["独自", "双人"],
+    startAreaFit: ["海淀高校区", "城区交通便利区域", "通用区域"],
+    preferenceTags: ["散步放空", "拍照打卡", "低预算约会", "想随便走走", "想拍照"],
+    estimatedCost: 38,
+    transportCost: 10,
+    foodCost: 20,
+    activityCost: 0,
+    flexibleCost: 8,
+    timeNeeded: "半天",
+    transportTime: 36,
+    trafficPressure: "中",
+    description: "这条路线适合预算很紧但想有北京本地生活感的同学。胡同、湖边和鼓楼街区本身就是免费的体验内容。",
+    steps: [
+      { place: "什刹海周边", action: "湖边散步、拍照、放空", cost: 0, tip: "晴天体验最好。" },
+      { place: "烟袋斜街/鼓楼附近", action: "胡同慢走，不强制进店", cost: 0, tip: "把小店当路过观察，不当消费任务。" },
+      { place: "护国寺或便利店", action: "吃一份小吃或简餐", cost: 20, tip: "预算 30 元时最好自带水。" }
+    ],
+    savingTip: "只安排一份小吃，不安排咖啡和正餐。",
+    riskTip: "节假日人多，拍照和散步体验会打折。",
+    upgradeOption: "预算到 80 元时，可以加一杯饮品或换成更完整的小吃组合。",
+    badWeatherAlternative: "下雨时换成西单大悦城 + 书店路线。",
+    whyRecommended: "它低消费、本地感强，能很好体现'轻出行'。"
+  },
+  {
+    routeId: "olympic-forest",
+    routeName: "奥森公园自然放空路线",
+    category: "自然放空",
+    destination: "奥森公园",
+    suitableFor: ["散步放空", "一个人独处"],
+    budgetRange: [30, 50],
+    weatherFit: ["晴天", "不确定"],
+    companionFit: ["独自", "双人"],
+    startAreaFit: ["海淀高校区", "昌平/沙河区域", "通用区域"],
+    preferenceTags: ["散步放空", "一个人独处", "想放空", "想省钱", "想随便走走"],
+    estimatedCost: 28,
+    transportCost: 10,
+    foodCost: 12,
+    activityCost: 0,
+    flexibleCost: 6,
+    timeNeeded: "只想出去 2-3 小时",
+    transportTime: 32,
+    trafficPressure: "低",
+    description: "如果你只是想离开宿舍喘口气，奥森是很适合的低成本选择。它不要求社交、不要求消费，也不要求你做复杂攻略。",
+    steps: [
+      { place: "奥森公园南园", action: "绕湖散步或坐着放空", cost: 0, tip: "独自出行也很自然。" },
+      { place: "公园便利点", action: "只买水或轻食", cost: 12, tip: "预算 30 元时建议自带水。" },
+      { place: "地铁口附近", action: "看状态决定是否返程", cost: 0, tip: "这条路线可以随时结束。" }
+    ],
+    savingTip: "自带水和小零食，花费可以压到地铁往返。",
+    riskTip: "天气太热、太冷或风大时不适合长时间户外。",
+    upgradeOption: "预算到 50 元时，可以返程前加一顿简餐。",
+    badWeatherAlternative: "雨天换成书店 + 商场公共区安静路线。",
+    whyRecommended: "它是最接近'低预算放空'的方案，决策成本很低。"
+  },
+  {
+    routeId: "liangma",
+    routeName: "亮马河夜景散步路线",
+    category: "河边夜游",
+    destination: "亮马河",
+    suitableFor: ["低预算约会", "拍照打卡", "朋友社交", "散步放空"],
+    budgetRange: [30, 80],
+    weatherFit: ["晴天", "晚上"],
+    companionFit: ["双人", "多人"],
+    startAreaFit: ["朝阳/东部区域", "城区交通便利区域"],
+    preferenceTags: ["低预算约会", "拍照打卡", "想聊天", "想有一点仪式感"],
+    estimatedCost: 42,
+    transportCost: 12,
+    foodCost: 20,
+    activityCost: 0,
+    flexibleCost: 10,
+    timeNeeded: "晚上",
+    transportTime: 38,
+    trafficPressure: "低",
+    description: "亮马河适合不想正式约会、但想有一点夜景和聊天空间的同学。预算的关键是不要把它变成酒吧或高价餐厅路线。",
+    steps: [
+      { place: "亮马河沿线", action: "夜景散步、拍照、聊天", cost: 0, tip: "把重点放在走路和聊天。" },
+      { place: "附近便利店/小吃", action: "买一份轻食或饮品", cost: 20, tip: "别临时进高价店。" },
+      { place: "桥边/河边公共空间", action: "短暂停留", cost: 0, tip: "适合双人和朋友。" }
+    ],
+    savingTip: "饮品控制在便利店或平价小店。",
+    riskTip: "夜间独自出行要注意返程时间。",
+    upgradeOption: "预算到 80 元时，可以加咖啡或甜品。",
+    badWeatherAlternative: "下雨时换成蓝色港湾或朝阳大悦城。",
+    whyRecommended: "它用免费公共空间提供氛围感，很适合低预算双人出行。"
+  },
+  {
+    routeId: "yuyuantan-zizhuyuan",
+    routeName: "玉渊潭/紫竹院安静散步路线",
+    category: "安静散步",
+    destination: "紫竹院",
+    suitableFor: ["一个人独处", "散步放空", "安静学习"],
+    budgetRange: [30, 50],
+    weatherFit: ["晴天", "不确定"],
+    companionFit: ["独自", "双人"],
+    startAreaFit: ["海淀高校区", "城区交通便利区域"],
+    preferenceTags: ["一个人独处", "散步放空", "想放空", "想学习", "想省钱"],
+    estimatedCost: 30,
+    transportCost: 8,
+    foodCost: 14,
+    activityCost: 0,
+    flexibleCost: 8,
+    timeNeeded: "只想出去 2-3 小时",
+    transportTime: 25,
+    trafficPressure: "低",
+    description: "从海淀出发时，这条路线很适合短时间恢复能量。它没有强任务，只是让你离开宿舍、走一走、换个脑子。",
+    steps: [
+      { place: "紫竹院或玉渊潭周边", action: "散步、坐一会儿、听歌", cost: 0, tip: "适合独处。" },
+      { place: "附近便利店", action: "买水或简单小吃", cost: 14, tip: "花费可控。" },
+      { place: "回程路上", action: "如果想学习，找附近书店或校园空间", cost: 0, tip: "不用把行程排满。" }
+    ],
+    savingTip: "不进咖啡店，预算可以稳定在 30 元以内。",
+    riskTip: "景色季节性比较强，普通周末可能不够'打卡'。",
+    upgradeOption: "预算到 50 元时，可以安排一杯平价饮品。",
+    badWeatherAlternative: "雨天换成书店 + 商场公共区安静学习路线。",
+    whyRecommended: "对海淀高校区学生来说，它交通成本低，适合快速恢复。"
+  },
+  {
+    routeId: "art-798",
+    routeName: "798 免费展 + 街区拍照路线",
+    category: "看展拍照",
+    destination: "798",
+    suitableFor: ["看展", "拍照打卡", "朋友社交"],
+    budgetRange: [50, 100],
+    weatherFit: ["晴天", "不确定", "太热"],
+    companionFit: ["独自", "双人", "多人"],
+    startAreaFit: ["朝阳/东部区域", "城区交通便利区域", "通用区域"],
+    preferenceTags: ["看展", "拍照打卡", "想拍照", "想有一点仪式感", "朋友社交"],
+    estimatedCost: 70,
+    transportCost: 14,
+    foodCost: 36,
+    activityCost: 10,
+    flexibleCost: 10,
+    timeNeeded: "半天",
+    transportTime: 50,
+    trafficPressure: "中",
+    description: "798 的优势是它既像看展，又像城市漫游。预算不高时，优先免费展、街区拍照和一顿轻餐。",
+    steps: [
+      { place: "798 街区", action: "先逛免费展和公共艺术空间", cost: 0, tip: "不用每个展都买票。" },
+      { place: "街区外立面", action: "拍照打卡、工业风漫游", cost: 0, tip: "晴天更适合。" },
+      { place: "周边简餐", action: "吃一顿轻餐", cost: 36, tip: "先看价格再进店。" }
+    ],
+    savingTip: "只选择免费展或低价展，把主要体验放在街区本身。",
+    riskTip: "部分展览收费较高，现场临时消费容易超预算。",
+    upgradeOption: "预算到 100 元时，可以加入一个低价展或咖啡停留。",
+    badWeatherAlternative: "雨天保留展馆部分，减少街区漫游。",
+    whyRecommended: "它能用较低预算提供'我真的出门看东西了'的感觉。"
+  },
+  {
+    routeId: "shougang",
+    routeName: "首钢园城市工业风拍照路线",
+    category: "城市拍照",
+    destination: "首钢园",
+    suitableFor: ["拍照打卡", "散步放空"],
+    budgetRange: [50, 80],
+    weatherFit: ["晴天", "不确定"],
+    companionFit: ["独自", "双人", "多人"],
+    startAreaFit: ["海淀高校区", "城区交通便利区域", "通用区域"],
+    preferenceTags: ["拍照打卡", "散步放空", "想拍照", "想随便走走"],
+    estimatedCost: 56,
+    transportCost: 14,
+    foodCost: 28,
+    activityCost: 0,
+    flexibleCost: 14,
+    timeNeeded: "半天",
+    transportTime: 55,
+    trafficPressure: "中",
+    description: "首钢园适合想拍出不一样城市感的同学。它比热门商圈更开阔，但交通时间需要提前接受。",
+    steps: [
+      { place: "首钢园主街区", action: "工业风建筑拍照、散步", cost: 0, tip: "晴天和傍晚更出片。" },
+      { place: "园区公共空间", action: "找开放空间休息", cost: 0, tip: "不要把行程排太满。" },
+      { place: "返程前简餐", action: "选择平价餐或便利店补给", cost: 28, tip: "园区内先看价格。" }
+    ],
+    savingTip: "把拍照作为主要活动，避免临时加入收费体验。",
+    riskTip: "从东部或房山出发交通时间可能偏长。",
+    upgradeOption: "预算到 80 元时，可以加饮品或轻餐。",
+    badWeatherAlternative: "下雨时不推荐，改成 798 或商场室内路线。",
+    whyRecommended: "它让低预算路线也有明确的视觉记忆点。"
+  },
+  {
+    routeId: "niujie",
+    routeName: "牛街小吃低预算路线",
+    category: "本地小吃",
+    destination: "牛街",
+    suitableFor: ["吃东西", "朋友社交"],
+    budgetRange: [50, 100],
+    weatherFit: ["晴天", "太冷", "不确定"],
+    companionFit: ["双人", "多人"],
+    startAreaFit: ["城区交通便利区域", "房山/良乡区域", "通用区域"],
+    preferenceTags: ["吃东西", "朋友社交", "想吃点好的", "想聊天"],
+    estimatedCost: 64,
+    transportCost: 12,
+    foodCost: 42,
+    activityCost: 0,
+    flexibleCost: 10,
+    timeNeeded: "半天",
+    transportTime: 45,
+    trafficPressure: "中",
+    description: "牛街更适合把预算花在真实的北京小吃上，而不是商场氛围上。多人一起去，可以每个人买一点再分享。",
+    steps: [
+      { place: "牛街主街", action: "挑 2-3 样小吃，不一次买太多", cost: 42, tip: "多人分享更划算。" },
+      { place: "周边街区", action: "短距离散步消食", cost: 0, tip: "本地生活感强。" },
+      { place: "返程地铁", action: "根据饱腹程度决定是否加餐", cost: 0, tip: "别被排队店带偏预算。" }
+    ],
+    savingTip: "每个人先设 40 元小吃上限，多人共享比单人买套餐更稳。",
+    riskTip: "热门店排队长，时间预算要留出来。",
+    upgradeOption: "预算到 100 元时，可以多尝两样招牌小吃。",
+    badWeatherAlternative: "雨天可改为商场美食区，舒适度更高。",
+    whyRecommended: "它把低预算和北京本地生活感结合得很自然。"
+  },
+  {
+    routeId: "huguosi",
+    routeName: "护国寺小吃 + 北海周边路线",
+    category: "小吃散步",
+    destination: "护国寺",
+    suitableFor: ["吃东西", "散步放空", "低预算约会"],
+    budgetRange: [50, 80],
+    weatherFit: ["晴天", "不确定"],
+    companionFit: ["独自", "双人"],
+    startAreaFit: ["城区交通便利区域", "海淀高校区", "通用区域"],
+    preferenceTags: ["吃东西", "散步放空", "低预算约会", "想随便走走"],
+    estimatedCost: 52,
+    transportCost: 10,
+    foodCost: 32,
+    activityCost: 0,
+    flexibleCost: 10,
+    timeNeeded: "半天",
+    transportTime: 35,
+    trafficPressure: "低",
+    description: "这条路线适合想吃一点北京味道，又不想只坐在餐厅里的同学。吃完后去北海周边走一圈，体验会比单纯吃饭完整。",
+    steps: [
+      { place: "护国寺小吃附近", action: "吃小吃或简餐", cost: 32, tip: "选两样就够。" },
+      { place: "北海公园周边", action: "不进园也能周边散步", cost: 0, tip: "预算紧时不安排门票。" },
+      { place: "胡同街区", action: "慢走、拍照、观察街区", cost: 0, tip: "适合双人聊天。" }
+    ],
+    savingTip: "不进收费景点，把体验放在街区和小吃上。",
+    riskTip: "如果只为吃东西而去，路程较远的同学可能觉得不值。",
+    upgradeOption: "预算到 80 元时，可以进北海或加一杯饮品。",
+    badWeatherAlternative: "下雨时改成西单大悦城或书店路线。",
+    whyRecommended: "它兼顾吃、走、看，有北京本地生活感。"
+  },
+  {
+    routeId: "study-bookstore",
+    routeName: "书店 + 商场公共区安静学习路线",
+    category: "安静学习",
+    destination: "书店",
+    suitableFor: ["安静学习", "雨天室内", "一个人独处"],
+    budgetRange: [30, 80],
+    weatherFit: ["雨天", "太热", "太冷", "不确定"],
+    companionFit: ["独自"],
+    startAreaFit: ["海淀高校区", "朝阳/东部区域", "城区交通便利区域", "通用区域"],
+    preferenceTags: ["安静学习", "一个人独处", "想学习", "想省钱", "雨天室内"],
+    estimatedCost: 34,
+    transportCost: 10,
+    foodCost: 18,
+    activityCost: 0,
+    flexibleCost: 6,
+    timeNeeded: "只想出去 2-3 小时",
+    transportTime: 30,
+    trafficPressure: "低",
+    description: "如果你不是想玩，只是想换个地方学习或恢复状态，这条路线最实用。它把消费压到交通和基础饮食，不要求你买咖啡。",
+    steps: [
+      { place: "书店", action: "浏览、学习、安静待一会儿", cost: 0, tip: "不要占用明显消费座位太久。" },
+      { place: "商场公共区", action: "换个位置休息或整理作业", cost: 0, tip: "适合雨天。" },
+      { place: "便利店/简餐", action: "补充轻食", cost: 18, tip: "比咖啡店更省钱。" }
+    ],
+    savingTip: "不把咖啡作为入场券，优先找公共座位和开放空间。",
+    riskTip: "热门书店座位有限，最好准备备选商场公共区。",
+    upgradeOption: "预算到 80 元时，可以买一杯饮品作为稳定座位。",
+    badWeatherAlternative: "本身就是雨天替代路线。",
+    whyRecommended: "它解决的是'想出去但不想花钱也不想社交'的真实需求。"
+  }
+];
+
 const initialForm = {
   start: "",
   budgetType: "50元",
@@ -73,8 +596,7 @@ const initialForm = {
   destination: "不指定，让 AI 推荐",
   weather: "晴天",
   companion: "独自",
-  moods: [],
-  transportPreference: "subway_first"
+  moods: []
 };
 
 function getBudgetValue(form) {
@@ -217,256 +739,143 @@ function getActivityContext(form, area, budget) {
 }
 
 function getTransitForRoute(route, form) {
-  const startInfo = form.startLocation?.transitZone ? form.startLocation : detectStartInfo(form.start);
-  return estimateTransitCost(startInfo, getDestinationTransitInfo(route.destination));
-}
-
-function startInfoFromResolvedLocation(startLocation, fallbackStart = "") {
-  const fallback = detectStartInfo(startLocation?.rawInput || fallbackStart || startLocation?.name || "");
-  return {
-    ...fallback,
-    rawInput: startLocation?.rawInput || fallbackStart,
-    name: startLocation?.name || fallback.matchedStation || fallbackStart,
-    type: startLocation?.type,
-    district: startLocation?.district || fallback.area,
-    address: startLocation?.address || "",
-    lat: startLocation?.lat,
-    lng: startLocation?.lng,
-    universityName: startLocation?.universityName,
-    region: startLocation?.region || fallback.transitZone,
-    coordinateStatus: startLocation?.coordinateStatus,
-    subwayLines: startLocation?.subwayLines || [],
-    nearbySubwayStations: startLocation?.nearbySubwayStations || startLocation?.nearestSubwayStations || [],
-    nearbyBusStops: startLocation?.nearbyBusStops || startLocation?.nearestBusStops || [],
-    nearestSubwayStations: startLocation?.nearestSubwayStations || startLocation?.nearbySubwayStations || [],
-    nearestBusStops: startLocation?.nearestBusStops || startLocation?.nearbyBusStops || [],
-    confidence: startLocation?.confidence ?? 0.6,
-    source: startLocation?.source || fallback.confidence
-  };
-}
-
-function primaryDestinationLocation(route) {
-  const step = route.steps.find((item) => item.costType !== "transport" && Number.isFinite(item.lat) && Number.isFinite(item.lng));
-  return {
-    name: route.destination,
-    address: step?.address || "",
-    lat: step?.lat,
-    lng: step?.lng,
-    nearestSubwayStations: step?.nearestSubway ? step.nearestSubway.split("/").map((value) => value.trim()).filter(Boolean) : [],
-    nearestBusStops: [],
-    district: step?.district || route.region || "",
-    source: step?.source || "route_template"
-  };
-}
-
-function routeWithDestinationLocation(route) {
-  return { ...route, destinationLocation: primaryDestinationLocation(route), primaryLocation: primaryDestinationLocation(route) };
-}
-
-async function enrichStartLocationTransit(startLocation) {
-  if (!Number.isFinite(startLocation?.lat) || !Number.isFinite(startLocation?.lng)) return startLocation;
-  if ((startLocation.nearestSubwayStations || []).length || (startLocation.nearestBusStops || []).length) return startLocation;
-  const [subway, bus] = await Promise.all([
-    findNearbySubwayStations(startLocation.lat, startLocation.lng),
-    findNearbyBusStops(startLocation.lat, startLocation.lng)
-  ]);
-  return {
-    ...startLocation,
-    nearestSubwayStations: subway.map((station) => station.name).slice(0, 3),
-    nearestBusStops: bus.map((station) => station.name).slice(0, 3)
-  };
-}
-
-function getPoiFailureReason(groups = []) {
-  const statuses = groups.map((group) => group?.poiStatus).filter(Boolean);
-  const errorCodes = groups.flatMap((group) => [group?.poiErrorCode, group?.poiErrorMessage]).filter(Boolean);
-  if (statuses.includes("amap_key_error") || errorCodes.some((value) => AMAP_KEY_ERROR_CODES.some((code) => String(value).includes(code)))) return "amap_key_error";
-  if (statuses.includes("missing_web_service_key")) return "missing_web_service_key";
-  if (statuses.includes("missing_key")) return "missing_key";
-  if (statuses.includes("missing_security_code")) return "missing_security_code";
-  if (statuses.includes("poi_no_result")) return "poi_no_result";
-  if (statuses.includes("route_no_result")) return "route_no_result";
-  if (statuses.some((status) => ["amap_web_service_error", "http_error", "poi_failed", "route_failed"].includes(status))) return "partial_map_result";
-  return getAmapConfigStatus().status === "configured" ? "poi_no_result" : getAmapConfigStatus().status;
-}
-
-function getPoiFailureDetail(groups = []) {
-  return groups.map((group) => group?.poiErrorMessage || group?.poiErrorCode).filter(Boolean)[0] || "";
-}
-
-function isRealPoiSource(source) {
-  return ["amap_poi", "amap_js_api", "amap_web_service"].includes(source);
-}
-
-function hasRealAmapPoi(route) {
-  return (route?.steps || []).some((step) => isRealPoiSource(step.source) || isRealPoiSource(step.primaryPoi?.source));
-}
-
-async function buildPoiStep(step, route, budget) {
-  const destination = route.destinationLocation || primaryDestinationLocation(route);
-  if (!Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) return step;
-  const [foods, convenience, drinks] = await Promise.all([
-    searchNearbyBudgetFood({ lat: destination.lat, lng: destination.lng, name: destination.name || route.destination, rawInput: route.destination, budget }),
-    searchNearbyConvenienceStores({ lat: destination.lat, lng: destination.lng, name: destination.name || route.destination, rawInput: route.destination }),
-    searchNearbyDrinkShops({ lat: destination.lat, lng: destination.lng, name: destination.name || route.destination, rawInput: route.destination, budget })
-  ]);
-  const poiFailureReason = getPoiFailureReason([foods, convenience, drinks]);
-  const poiFailureDetail = getPoiFailureDetail([foods, convenience, drinks]);
-  const candidates = (foods.length ? foods : [...convenience, ...drinks]).filter((poi) => isRealPoiSource(poi.source));
-  const primaryPoi = selectBestPoiByDistanceAndBudget(candidates, budget);
-  if (!primaryPoi) {
-    const message = getAmapPoiFailureMessage(poiFailureReason, poiFailureDetail);
-    return {
-      ...step,
-      source: "poi_no_result",
-      poiFailureReason,
-      poiFailureDetail,
-      whyRecommended: message,
-      tip: message
-    };
-  }
-  const alternatives = candidates
-    .filter((poi) => poi.poiId !== primaryPoi.poiId)
-    .slice(0, 2)
-    .map((poi) => ({
-      name: poi.name,
-      address: poi.address,
-      estimatedCost: poi.estimatedCost,
-      distance: poi.distance,
-      mapUrl: poi.mapUrl,
-      lat: poi.lat,
-      lng: poi.lng,
-      poiId: poi.poiId
-    }));
-
-  return {
-    ...step,
-    type: "food",
-    costType: "food",
-    place: primaryPoi.name,
-    name: primaryPoi.name,
-    action: `去具体店铺补给：${primaryPoi.name}`,
-    cost: primaryPoi.estimatedCost,
-    address: primaryPoi.address,
-    lat: primaryPoi.lat,
-    lng: primaryPoi.lng,
-    source: primaryPoi.source,
-    poiId: primaryPoi.poiId,
-    amapKeyword: primaryPoi.name,
-    primaryPoi: {
-      name: primaryPoi.name,
-      address: primaryPoi.address,
-      lat: primaryPoi.lat,
-      lng: primaryPoi.lng,
-      estimatedCost: primaryPoi.estimatedCost,
-      distance: primaryPoi.distance,
-      mapUrl: primaryPoi.mapUrl,
-      poiId: primaryPoi.poiId
-    },
-    alternatives,
-    distanceFromPrevious: primaryPoi.distance,
-    whyRecommended: `离${route.destination}约 ${primaryPoi.distance} 米，价格相对稳定，适合控制在 ${budget} 元预算内。`,
-    tip: `首选 ${primaryPoi.name}；备选：${alternatives.map((poi) => poi.name).join(" / ") || "暂无稳定备选"}。`
-  };
-}
-
-function poiToStep(poi, route, kind) {
-  const labels = {
-    food: ["餐饮推荐", "价格相对稳定，适合控制预算。"],
-    convenience: ["便利店/饮品推荐", "适合买水、饮料或简单补给，不容易超预算。"],
-    comfort: ["舒适停留点", "适合短暂停留、休息、调整路线。"]
-  };
-  const [label, reason] = labels[kind];
-  return {
-    id: `${route.routeId}-${kind}-${poi.poiId || poi.name}`,
-    type: kind === "comfort" ? "rest" : "food",
-    costType: kind === "comfort" ? "other" : "food",
-    place: poi.name,
-    name: poi.name,
-    action: `${label}：${poi.name}`,
-    tip: `我为你找到的真实地图 POI。${reason}`,
-    cost: poi.estimatedCost,
-    address: poi.address,
-    district: route.region || "",
-    nearestSubway: route.transport?.endStation || route.destination,
-    lat: poi.lat,
-    lng: poi.lng,
-    amapKeyword: poi.name,
-    openTime: "以地图实时信息为准",
-    estimatedStay: kind === "comfort" ? "20-45分钟" : "15-35分钟",
-    whyRecommended: `距离当前路线点约 ${poi.distance} 米，${reason}来自地图 POI，出发前仍建议确认营业状态。`,
-    source: poi.source,
-    poiId: poi.poiId,
-    primaryPoi: poi,
-    alternatives: [],
-    distanceFromPrevious: poi.distance
-  };
-}
-
-async function ensureConcretePoiSteps(route, steps, budget) {
-  const destination = route.destinationLocation || primaryDestinationLocation(route);
-  if (!Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) return steps;
-  const searchBase = { lat: destination.lat, lng: destination.lng, name: destination.name || route.destination, rawInput: route.destination };
-  const [foods, convenience, drinks, comfort] = await Promise.all([
-    searchNearbyBudgetFood({ ...searchBase, budget }),
-    searchNearbyConvenienceStores(searchBase),
-    searchNearbyDrinkShops({ ...searchBase, budget }),
-    searchNearbyComfortStops(searchBase)
-  ]);
-  const withPois = [...steps];
-  const existingFood = withPois.some((step) => step.costType === "food" && isRealPoiSource(step.source));
-  const existingConvenience = withPois.some((step) => /便利|饮品|咖啡|奶茶/.test(step.action + step.place) && isRealPoiSource(step.source));
-  const existingComfort = withPois.some((step) => step.type === "rest" && isRealPoiSource(step.source));
-  const foodPoi = selectBestPoiByDistanceAndBudget(foods.filter((poi) => isRealPoiSource(poi.source)), budget);
-  const conveniencePoi = selectBestPoiByDistanceAndBudget([...convenience, ...drinks].filter((poi) => isRealPoiSource(poi.source)), budget);
-  const comfortPoi = selectBestPoiByDistanceAndBudget(comfort.filter((poi) => isRealPoiSource(poi.source)), budget);
-
-  if (!existingFood && foodPoi) withPois.push(poiToStep(foodPoi, route, "food"));
-  if (!existingConvenience && conveniencePoi) withPois.push(poiToStep(conveniencePoi, route, "convenience"));
-  if (!existingComfort && comfortPoi) withPois.push(poiToStep(comfortPoi, route, "comfort"));
-  return withPois;
-}
-
-async function enhanceRouteWithMapData(route, form, startLocation) {
-  const budget = getBudgetValue(form);
-  const routeWithLocation = routeWithDestinationLocation(route);
-  const transport = await planTransitRoute({ from: startLocation, to: routeWithLocation.destinationLocation });
-  const replacedSteps = await Promise.all(routeWithLocation.steps.map((step) => (
-    step.costType === "food" || /餐|吃|小吃|轻食|简餐|饮品|便利店|补给/.test(step.action + step.place)
-      ? buildPoiStep(step, routeWithLocation, budget)
-      : Promise.resolve(step)
-  )));
-  const enhancedSteps = await ensureConcretePoiSteps({ ...routeWithLocation, transport }, replacedSteps, budget);
-  const mapPoiStatus = hasRealAmapPoi({ steps: enhancedSteps })
-    ? "map_loaded"
-    : getPoiFailureReason(enhancedSteps.map((step) => ({ poiStatus: step.poiFailureReason })).filter((item) => item.poiStatus));
-  const mapPoiDetail = getPoiFailureDetail(enhancedSteps.map((step) => ({
-    poiErrorMessage: step.poiFailureDetail,
-    poiErrorCode: step.poiFailureReason
-  })).filter((item) => item.poiErrorMessage || item.poiErrorCode));
-
-  return {
-    ...routeWithLocation,
-    transport,
-    transitEstimate: {
-      ...(route.transitEstimate || {}),
-      arrivalStations: [transport.endStation],
-      recommendedMode: transport.startStationType === "bus" ? "公交/地铁结合" : "地铁 + 步行",
-      roundTripFare: transport.estimatedTransportCost,
-      estimatedTime: transport.estimatedDuration,
-      estimatedDistanceLevel: transport.estimatedDistance,
-      startLabel: `识别到「${startLocation.name}」`,
-      explanation: "交通费为估算值，实际以地图导航和公共交通票价为准。"
-    },
-    steps: enhancedSteps,
-    mapPoiStatus,
-    mapPoiNotice: mapPoiStatus === "map_loaded" ? "" : getAmapPoiFailureMessage(mapPoiStatus, mapPoiDetail)
-  };
+  return estimateTransitCost(detectStartInfo(form.start), getDestinationTransitInfo(route.destination));
 }
 
 function routeContains(route, words) {
-  const text = `${route.routeName} ${route.category} ${route.destination} ${route.suitableFor.join(" ")} ${route.preferenceTags.join(" ")}`;
+  const text = getRouteDestinationText(route);
   return words.some((word) => text.includes(word));
+}
+
+function normalizeDestination(destination) {
+  return String(destination || "").trim();
+}
+
+function getDestinationGroupTerms(destination) {
+  const normalized = normalizeDestination(destination);
+  if (!normalized) return [];
+  const directGroup = destinationGroups[normalized] || [];
+  const containingGroup = Object.values(destinationGroups).find((group) => group.includes(normalized)) || [];
+  return [...new Set([normalized, ...directGroup, ...containingGroup])];
+}
+
+function textIncludesAnyTerm(text, terms) {
+  return terms.some((term) => term && text.includes(term));
+}
+
+function isSpecificDestination(destination) {
+  const normalized = normalizeDestination(destination);
+  if (nonspecificDestinations.has(normalized)) return false;
+  return Boolean(normalized);
+}
+
+function getRouteDestinationText(route) {
+  return [
+    route.destination,
+    route.routeName,
+    route.category,
+    route.description,
+    ...(route.relatedDestinations || []),
+    ...(route.nearbyDestinations || []),
+    ...(route.tags || []),
+    ...(route.preferenceTags || []),
+    ...(route.suitableFor || []),
+    ...(route.steps || []).flatMap((step) => [step.place, step.action, step.tip])
+  ].filter(Boolean).join(" ");
+}
+
+function isRouteRelatedToDestination(route, selectedDestination) {
+  const selected = normalizeDestination(selectedDestination);
+  const routeDestination = normalizeDestination(route?.destination);
+  if (!route || !isSpecificDestination(selected)) return false;
+  if (routeDestination === selected) return true;
+  if (routeDestination.includes(selected) || selected.includes(routeDestination)) return true;
+
+  const selectedTerms = getDestinationGroupTerms(selected);
+  const routeTerms = getDestinationGroupTerms(routeDestination);
+  const explicitRouteTerms = [
+    ...(route.relatedDestinations || []),
+    ...(route.nearbyDestinations || []),
+    ...(route.tags || [])
+  ];
+  const routeText = getRouteDestinationText(route);
+
+  if (textIncludesAnyTerm(routeText, [selected])) return true;
+  if (explicitRouteTerms.some((term) => selectedTerms.includes(term) || selected.includes(term) || term.includes(selected))) return true;
+  return selectedTerms.includes(routeDestination) || routeTerms.includes(selected);
+}
+
+function hasIndoorNeed(form, moods = getEffectiveMoods(form)) {
+  return indoorNeedWeathers.has(form.weather)
+    || form.activities.includes("雨天室内")
+    || moods.some((mood) => indoorNeedMoods.has(mood));
+}
+
+function hasSocialNeed(form, moods = getEffectiveMoods(form)) {
+  return form.companion === "多人" || moods.some((mood) => socialMoods.has(mood));
+}
+
+function routeLooksIndoor(route) {
+  return route.weatherFit?.some((weather) => indoorNeedWeathers.has(weather))
+    || routeContains(route, indoorWords);
+}
+
+function routeLooksPureOutdoor(route) {
+  return routeContains(route, pureOutdoorWords) && !routeLooksIndoor(route);
+}
+
+function routeLooksSocial(route) {
+  return route.companionFit?.includes("多人") && routeContains(route, socialWords);
+}
+
+function routeLooksQuietSolo(route) {
+  return routeContains(route, quietSoloWords);
+}
+
+function routeMatchesInterestConstraints(route, form, socialNeed) {
+  if (form.activities.includes("看展") && !routeContains(route, exhibitionWords)) return false;
+  if (form.activities.includes("吃东西") && !routeContains(route, foodWords)) return false;
+  if (form.activities.includes("逛街") && !routeContains(route, shoppingWords)) return false;
+  if (form.activities.includes("安静学习")) {
+    if (socialNeed) return routeContains(route, ["商场", "咖啡", "书店", "美食区", "合生汇", "大悦城"]);
+    return routeContains(route, quietStudyWords);
+  }
+  return true;
+}
+
+function routeSatisfiesHardConstraints(route, form) {
+  const budget = getBudgetValue(form);
+  const area = detectStartArea(form.start);
+  const moods = getEffectiveMoods(form, area, budget);
+  const indoorNeed = hasIndoorNeed(form, moods);
+  const socialNeed = hasSocialNeed(form, moods);
+
+  if (indoorNeed && routeLooksPureOutdoor(route)) return false;
+  if (indoorNeed && !routeLooksIndoor(route)) return false;
+  if (socialNeed && !form.activities.includes("看展") && routeContains(route, exhibitionWords)) return false;
+  if (socialNeed && routeLooksQuietSolo(route)) return false;
+  if (socialNeed && !routeLooksSocial(route)) return false;
+  if (moods.includes("想短时间透透气")) {
+    const transit = getTransitForRoute(route, form);
+    if (transit.trafficPressure === "高" || route.transportTime > 50) return false;
+  }
+  return routeMatchesInterestConstraints(route, form, socialNeed);
+}
+
+function applyHardConstraints(candidateRoutes, form) {
+  const constrained = candidateRoutes.filter((route) => routeSatisfiesHardConstraints(route, form));
+  if (constrained.length >= 3) return constrained;
+  if (isSpecificDestination(form.destination)) return candidateRoutes;
+  if (!constrained.length) return candidateRoutes;
+
+  const supplemented = [...constrained];
+  const anchorDestination = constrained[0].destination;
+  ["cheap", "steady", "vibe"].forEach((planType, index) => {
+    if (supplemented.length < 3) {
+      supplemented.push(createDestinationFallbackRoute(anchorDestination, planType, index, form));
+    }
+  });
+  return supplemented.filter((route) => routeSatisfiesHardConstraints(route, form)).slice(0, 3);
 }
 
 function scoreMoodFit(route, form, transit, activities, area, budget) {
@@ -532,11 +941,11 @@ function scoreRoute(route, form) {
   const moods = getEffectiveMoods(form, area, budget);
   const tier = getBudgetTier(budget);
   const timeLabel = timePreferenceLabelForAi(form);
-  const destinationSpecified = !form.destination.includes("不指定");
+  const destinationSpecified = isSpecificDestination(form.destination);
   const activityMatches = activities.filter((activity) => route.suitableFor.includes(activity) || route.preferenceTags.includes(activity));
   let score = 0;
 
-  if (destinationSpecified && (route.destination.includes(form.destination) || form.destination.includes(route.destination) || route.routeName.includes(form.destination))) score += 22;
+  if (destinationSpecified && isRouteRelatedToDestination(route, form.destination)) score += 22;
   if (activityMatches.length > 0) score += 14 + activityMatches.length * 9;
   score += scoreMoodFit(route, form, transit, activities, area, budget);
   if (route.weatherFit.includes(form.weather)) score += ["雨天", "太热", "太冷"].includes(form.weather) ? 22 : 12;
@@ -638,18 +1047,26 @@ function moodTradeoffNote(selectedMoods, budget) {
   return "";
 }
 
-function planTargetRange(budget, planType) {
-  const ranges = {
-    cheap: [0.4, 0.65, 0.55],
-    steady: [0.65, 0.85, 0.78],
-    vibe: [0.8, 1.05, 0.95]
+function getBudgetTargetRange(budget, planType) {
+  const fixedRanges = {
+    30: { cheap: [20, 30], steady: [25, 35], vibe: [30, 40] },
+    50: { cheap: [35, 45], steady: [45, 55], vibe: [55, 70] },
+    80: { cheap: [60, 75], steady: [75, 90], vibe: [85, 110] },
+    100: { cheap: [80, 95], steady: [95, 115], vibe: [110, 135] },
+    200: { cheap: [140, 170], steady: [170, 210], vibe: [200, 240] }
   };
-  const [minRate, maxRate, targetRate] = ranges[planType];
-  const adjustedTargetRate = planType === "cheap" && budget <= 69 ? 0.62 : targetRate;
+  const numericBudget = roundToYuan(budget);
+  const range = fixedRanges[numericBudget]?.[planType];
+  const dynamicRanges = {
+    cheap: [0.7, 0.85],
+    steady: [0.85, 1.05],
+    vibe: [1, 1.2]
+  };
+  const [minValue, maxValue] = range || dynamicRanges[planType].map((rate) => roundToYuan(numericBudget * rate));
   return {
-    min: Math.max(roundToYuan(budget * minRate), planType === "cheap" && budget <= 69 ? 30 : 0),
-    max: roundToYuan(budget * maxRate),
-    target: roundToYuan(budget * adjustedTargetRate)
+    min: minValue,
+    max: maxValue,
+    target: roundToYuan((minValue + maxValue) / 2)
   };
 }
 
@@ -694,9 +1111,9 @@ function foodCostFor(route, form, tier, planType, remainingAfterTraffic) {
 function generateBudgetPlan(route, userBudget, planType, form, transit) {
   const tier = getBudgetTier(userBudget);
   const moods = getEffectiveMoods(form, detectStartArea(form.start), userBudget);
-  const targetRange = planTargetRange(userBudget, planType);
+  const targetRange = getBudgetTargetRange(userBudget, planType);
   const trafficCost = transit.roundTripFare;
-  const targetCost = Math.max(targetRange.min, targetRange.target);
+  const targetCost = targetRange.target;
   const remainingAfterTraffic = Math.max(12, targetCost - trafficCost);
   const activityCost = activityCostFor(route, form, tier, planType, remainingAfterTraffic);
   let foodCost = foodCostFor(route, form, tier, planType, Math.max(12, remainingAfterTraffic - activityCost));
@@ -756,8 +1173,7 @@ function generateBudgetPlan(route, userBudget, planType, form, transit) {
 
 function cloneWithAdjustments(route, form, variant, index) {
   const budget = getBudgetValue(form);
-  const transit = route.transitEstimate || getTransitForRoute(route, form);
-  const transport = route.transport;
+  const transit = getTransitForRoute(route, form);
   const budgetPlan = generateBudgetPlan(route, budget, variant, form, transit);
   const tier = budgetTier(budget);
   const lowBudgetNote = tier === "tight"
@@ -767,34 +1183,18 @@ function cloneWithAdjustments(route, form, variant, index) {
       : getBudgetTier(budget).key === "high"
         ? "你这次预算比较充足，我会保留省钱底线，同时给方案留出真实的体验升级。"
         : "预算稍微宽松，可以留一个舒适停留点，但仍然要避免连续消费。";
+  const budgetWarning = budgetPlan.totalCost > budget;
   const matchingMoods = getRouteMatchingMoods(route, form);
   const tradeoffNote = moodTradeoffNote(getEffectiveMoods(form, detectStartArea(form.start), budget), budget);
   const upgradeStep = budgetPlan.upgradeCost > 0
     ? {
-        id: `${route.routeId}-upgrade-${variant}`,
-        type: "activity",
         place: variant === "vibe" ? "体验升级点" : "舒适停留点",
         action: budgetPlan.budgetExplanation.match(/升级项：([^，。]+)/)?.[1] || "加入一个预算内的体验升级",
         cost: budgetPlan.upgradeCost,
-        tip: budgetPlan.budgetStatus === "可能略超" ? "如果临场价格偏高，可以把这个升级项取消。" : "这是让高预算方案不再停留在低配路线的关键。",
-        address: `${route.destination}附近，按现场价格选择低价展览、咖啡、甜品或体验项目`,
-        district: "北京市",
-        nearestSubway: route.transitEstimate?.arrivalStations?.join(" / ") || route.destination,
-        lat: route.steps.find((step) => Number.isFinite(step.lat))?.lat,
-        lng: route.steps.find((step) => Number.isFinite(step.lng))?.lng,
-        amapKeyword: `${route.destination} 平价咖啡 低价展览 甜品`,
-        openTime: "以地图店铺信息为准",
-        estimatedStay: "45-60分钟",
-        whyRecommended: "这是预算更宽松时的可选升级，现场价格不合适就直接取消。",
-        copyText: `${variant === "vibe" ? "体验升级点" : "舒适停留点"}：${budgetPlan.upgradeCost}元，可现场取消。`
+        tip: budgetPlan.budgetStatus === "可能略超" ? "如果临场价格偏高，可以把这个升级项取消。" : "这是让高预算方案不再停留在低配路线的关键。"
       }
     : null;
-  const routeSteps = route.steps.map((step) => ({
-    ...step,
-    costType: step.costType || (/餐|吃|小吃|轻食|简餐|饮品|便利店|补给/.test(step.action + step.place) ? "food" : "activity")
-  }));
-  const dynamicSteps = routeSteps.map((step) => {
-    if (step.source === "amap_poi" || step.primaryPoi) return step;
+  const dynamicSteps = route.steps.map((step) => {
     if (step.cost === route.foodCost || /餐|吃|小吃|轻食|简餐|饮品/.test(step.action + step.place)) {
       return { ...step, cost: budgetPlan.foodCost, tip: budgetPlan.foodCost > route.foodCost ? "预算更充足时，可以从简餐升级到更舒服的餐饮选择。" : step.tip };
     }
@@ -804,54 +1204,32 @@ function cloneWithAdjustments(route, form, variant, index) {
     return step;
   });
   if (upgradeStep) dynamicSteps.push(upgradeStep);
-  const transitStep = {
-    id: `${route.routeId}-transport`,
-    type: "transport",
-    place: `${transport?.fromName || form.start || "出发地"}往返${route.destination}`,
-    action: transport?.transitSummary || `${transit.recommendedMode}，到达站建议：${transit.arrivalStations.join(" / ") || route.destination}`,
-    cost: transport?.estimatedTransportCost || transit.roundTripFare,
-    costType: "transport",
-    tip: "交通费为估算值，实际以地图导航和公共交通票价为准。",
-    address: transport?.fromAddress || form.start || "用户输入的出发地",
-    district: transit.startArea,
-    nearestSubway: `出发：${transport?.startStation || "附近地铁/公交站"}；到达：${transport?.endStation || transit.arrivalStations.join(" / ") || route.destination}`,
-    lat: transport?.fromLat || dynamicSteps.find((step) => Number.isFinite(step.lat))?.lat,
-    lng: transport?.fromLng || dynamicSteps.find((step) => Number.isFinite(step.lng))?.lng,
-    amapKeyword: `${form.start || transit.startArea} 到 ${route.destination}`,
-    openTime: "以公共交通运营时间为准",
-    estimatedStay: transport?.estimatedDuration || transit.estimatedTime,
-    whyRecommended: transport?.transitSummary || `从${form.start || transit.startArea}出发，${route.destination}往返交通估算约 ${transit.roundTripFare} 元。`,
-    copyText: `交通：${transport?.transitSummary || transit.recommendedMode}，往返约 ${transport?.estimatedTransportCost || transit.roundTripFare} 元。`,
-    mapRouteUrl: transport?.mapRouteUrl
-  };
-  const stepsWithTransport = [transitStep, ...dynamicSteps];
-  const budgetPreview = calculateRouteBudget({ steps: stepsWithTransport });
-  const budgetWarning = budgetPreview.totalCost > budget;
-  const tightBudgetNote = budgetPreview.totalCost > budget
-    ? " 这条路线超出预算，建议减少升级项、把饮品换成便利店饮料，或取消额外体验。"
-    : budgetPreview.totalCost > budget * 0.9
-      ? " 这条路线预算较紧，建议保留 5 元左右机动空间。"
-      : "";
-  const baseRoute = {
+
+  return {
     ...route,
-    planType: index === 0 ? "方案 A：近距离优先" : index === 1 ? "方案 B：预算稳妥" : "方案 C：偏好匹配",
+    planType: index === 0 ? "方案 A：最省钱" : index === 1 ? "方案 B：最稳妥" : "方案 C：最有氛围感",
+    estimatedCost: budgetPlan.totalCost,
     userBudget: budget,
+    budgetStatus: budgetPlan.budgetStatus,
+    budgetUsageRate: budgetPlan.budgetUsageRate,
     budgetExplanation: budgetPlan.budgetExplanation,
+    transportCost: budgetPlan.trafficCost,
+    foodCost: budgetPlan.foodCost,
+    activityCost: budgetPlan.activityCost,
+    flexibleCost: budgetPlan.flexibleCost,
+    upgradeCost: budgetPlan.upgradeCost,
     transportTime: transit.estimatedTime,
     trafficPressure: transit.trafficPressure,
     transitEstimate: transit,
-    transport,
     budgetWarning,
+    tags: tagFor({ ...route, budgetWarning }, form, variant),
     matchingMoods,
     moodFitReason: moodFitReason(matchingMoods),
     moodTradeoffNote: tradeoffNote,
     budgetMoodNote: budgetPlan.budgetExplanation,
-    steps: stepsWithTransport,
-    tags: tagFor({ ...route, budgetWarning, estimatedCost: budgetPreview.totalCost }, form, variant),
-    aiNote: `${route.personalizedReason ? `${route.personalizedReason} ` : ""}${route.crossRegionFallback ? "稍远但值得去：这条路线不是最近选项，但和你的偏好匹配，所以作为补充方案。 " : ""}${lowBudgetNote}${budgetWarning ? " 这个方案已经超出预算，只有在你特别想去这个方向时才建议保留。" : ""}${tightBudgetNote} ${budgetPlan.budgetExplanation}${tradeoffNote ? ` ${tradeoffNote}` : ""}${form.companion === "独自" ? " 你是独自出行，所以我也优先考虑了可随时结束、社交压力低的路线。" : form.companion === "双人" ? " 双人出行更适合把钱花在聊天停留点，而不是堆消费项目。" : " 多人出行时集合和选择弹性更重要，所以我避开了过窄、过依赖预约的路线。"}`
+    steps: dynamicSteps,
+    aiNote: `${lowBudgetNote}${budgetWarning ? " 这个方案可能略超预算，原因是加入了更完整的餐饮或体验升级；可以删掉升级项回到预算内。" : ""} ${budgetPlan.budgetExplanation}${tradeoffNote ? ` ${tradeoffNote}` : ""}${form.companion === "独自" ? " 你是独自出行，所以我也优先考虑了可随时结束、社交压力低的路线。" : form.companion === "双人" ? " 双人出行更适合把钱花在聊天停留点，而不是堆消费项目。" : " 多人出行时集合和选择弹性更重要，所以我避开了过窄、过依赖预约的路线。"}`
   };
-
-  return attachBudgetSummary(baseRoute, budget);
 }
 
 function planSpecificScore(route, form, planType) {
@@ -860,6 +1238,8 @@ function planSpecificScore(route, form, planType) {
   const tier = getBudgetTier(budget);
   const base = scoreRoute(route, form);
   let score = base;
+  if (route.fallbackPlanType === planType) score += 80;
+  if (route.fallbackPlanType && route.fallbackPlanType !== planType) score -= 20;
 
   if (planType === "cheap") {
     if (route.activityCost === 0) score += 18;
@@ -902,47 +1282,113 @@ function pickRouteForPlan(scoredRoutes, form, planType, picked) {
     || scoredRoutes.find((route) => !picked.some((item) => item.routeId === route.routeId));
 }
 
-async function generateRecommendationResult(form) {
-  const rawResolvedStart = form.startLocation || (await resolveStartLocation(form.start));
-  const resolvedStart = await enrichStartLocationTransit(rawResolvedStart);
-  if (resolvedStart.needsClarification || !Number.isFinite(resolvedStart.lat) || !Number.isFinite(resolvedStart.lng)) {
-    return {
-      routes: [],
-      startLocation: resolvedStart,
-      candidates: resolvedStart.candidates || [],
-      message: resolvedStart.message || "这个出发地有多个可能位置，请先选择一个更准确的候选地点。"
-    };
-  }
+function createDestinationFallbackRoute(destination, planType, index, form) {
+  const terms = getDestinationGroupTerms(destination);
+  const nearby = terms.filter((term) => term !== destination).slice(0, 3);
+  const nearbyText = nearby.length ? nearby.join("、") : "周边公共空间";
+  const isIndoor = /合生汇|大悦城|荟聚|商场|书店|图书馆|咖啡|展|美术馆|典籍|电影/.test(destination);
+  const isFood = /牛街|护国寺|簋街|美食|B1|吃/.test(destination);
+  const isPark = /公园|玉渊潭|紫竹院|奥森|北海/.test(destination);
+  const category = isFood ? "目的地小吃" : isPark ? "目的地散步" : isIndoor ? "目的地室内" : "目的地周边";
+  const routeNames = {
+    cheap: `${destination}省钱版`,
+    steady: `${destination}稳妥版`,
+    vibe: `${destination}体验升级版`
+  };
+  const foodAction = planType === "cheap"
+    ? "选择便利店、平价小吃或自带水，把消费点控制在一个以内"
+    : planType === "steady"
+      ? "安排一顿简餐或小吃，先看价格再进店"
+      : "根据预算选择正餐、甜品、咖啡或特色小吃作为升级点";
+  const mainAction = isPark
+    ? "把主要时间放在散步、坐着放空和低压力聊天"
+    : isFood
+      ? "沿主街慢慢挑选，不被排队店带着超预算"
+      : isIndoor
+        ? "逛公共区、店铺动线或展陈空间，不强制购物"
+        : "围绕目的地拍照、散步和短暂停留";
+  const surroundingAction = planType === "cheap"
+    ? `只加入${nearbyText}的免费短停留`
+    : planType === "steady"
+      ? `把${nearbyText}作为散步或休息备选`
+      : `天气和体力允许时，把${nearbyText}加入氛围升级`;
 
-  const startLocation = startInfoFromResolvedLocation(resolvedStart, form.start);
-  const formWithLocation = { ...form, startLocation };
-  const routePool = routesData.map(routeWithDestinationLocation);
-  const rankedForUser = sortRoutesForUser(routePool, formWithLocation, startLocation);
-  const mapEnhancedRoutes = await Promise.all(rankedForUser.slice(0, 3).map((route) => enhanceRouteWithMapData(route, formWithLocation, startLocation)));
-  const routes = mapEnhancedRoutes.map((route, index) => cloneWithAdjustments(route, formWithLocation, ["cheap", "steady", "vibe"][index], index));
-
-  return { routes, startLocation, candidates: [], message: "" };
+  return {
+    routeId: `dynamic-${destination}-${planType}-${index}`,
+    routeName: routeNames[planType],
+    fallbackPlanType: planType,
+    category,
+    destination,
+    relatedDestinations: terms,
+    nearbyDestinations: nearby,
+    suitableFor: getActivityContext(form, detectStartArea(form.start), getBudgetValue(form)),
+    budgetRange: [30, 300],
+    weatherFit: isIndoor ? ["雨天", "太热", "太冷", "不确定", "晴天"] : ["晴天", "不确定", "晚上"],
+    companionFit: ["独自", "双人", "多人"],
+    startAreaFit: [getDestinationTransitInfo(destination).area, "通用区域"],
+    preferenceTags: ["想省钱", "想聊天", "想随便走走", "低预算约会", "朋友社交", category],
+    estimatedCost: planType === "cheap" ? 38 : planType === "steady" ? 58 : 82,
+    transportCost: 10,
+    foodCost: planType === "cheap" ? 18 : planType === "steady" ? 35 : 58,
+    activityCost: planType === "vibe" ? 20 : 0,
+    flexibleCost: planType === "cheap" ? 5 : planType === "steady" ? 10 : 18,
+    timeNeeded: planType === "vibe" ? "半天" : "只想出去 2-3 小时",
+    transportTime: 35,
+    trafficPressure: "中",
+    description: `这是一条在路线库不足时生成的${destination}限定方案。它不会跳到无关目的地，而是把消费结构、活动节点和周边停留都控制在${destination}及${nearbyText}范围内。`,
+    steps: [
+      { place: destination, action: mainAction, cost: 0, tip: `核心活动固定在${destination}，不临时改去无关目的地。` },
+      { place: destination, action: foodAction, cost: planType === "cheap" ? 18 : planType === "steady" ? 35 : 58, tip: "餐饮是最容易超预算的部分，先定上限再选择。" },
+      { place: nearby[0] || `${destination}周边`, action: surroundingAction, cost: 0, tip: "周边段只作为补充，不改变目的地范围。" }
+    ],
+    savingTip: `先把${destination}作为唯一核心目的地，只保留一个餐饮消费点。`,
+    riskTip: "动态补足方案依赖现场价格和客流，出发前仍建议看地图和营业状态。",
+    upgradeOption: `预算更高时，可以在${destination}加入咖啡、甜品、正餐、电影或展览等一个升级项。`,
+    badWeatherAlternative: isIndoor ? `保留${destination}室内动线，减少周边段。` : `天气不好时减少户外停留，优先找${destination}附近室内公共空间。`,
+    whyRecommended: `因为你明确选择了${destination}，所以补充方案仍然限定在${destination}及周边。`
+  };
 }
 
-async function generateRecommendations(form) {
-  const result = await generateRecommendationResult(form);
-  return result.routes;
+function ensureThreeDestinationRoutes(candidateRoutes, form) {
+  if (!isSpecificDestination(form.destination) || candidateRoutes.length >= 3) return candidateRoutes;
+  const planTypes = ["cheap", "steady", "vibe"];
+  const existing = [...candidateRoutes];
+
+  planTypes.forEach((planType, index) => {
+    existing.push(createDestinationFallbackRoute(form.destination, planType, index, form));
+  });
+  return existing;
+}
+
+function generateRecommendations(form) {
+  const destinationCandidates = isSpecificDestination(form.destination)
+    ? ensureThreeDestinationRoutes(routesData.filter((route) => isRouteRelatedToDestination(route, form.destination)), form)
+    : routesData;
+  const candidateRoutes = applyHardConstraints(destinationCandidates, form);
+  const ranked = [...candidateRoutes].sort((a, b) => scoreRoute(b, form) - scoreRoute(a, form));
+  const picked = [];
+
+  ["cheap", "steady", "vibe"].forEach((planType) => {
+    const candidate = pickRouteForPlan(ranked, form, planType, picked);
+    if (candidate) picked.push(candidate);
+  });
+
+  while (picked.length < 3) {
+    const fallback = ranked.find((route) => !picked.some((item) => item.routeId === route.routeId));
+    if (!fallback) break;
+    picked.push(fallback);
+  }
+
+  return picked.slice(0, 3).map((route, index) => cloneWithAdjustments(route, form, ["cheap", "steady", "vibe"][index], index));
 }
 
 function trafficDecisionNote(form, firstRoute) {
   const budget = getBudgetValue(form);
-  const startInfo = form.startLocation || detectStartInfo(form.start);
-  const stationText = [...(startInfo.nearestSubwayStations || []), ...(startInfo.nearestBusStops || [])].slice(0, 3).join(" / ");
-  const startText = startInfo.name
-    ? `是【${startInfo.name}】，位于【${startInfo.district || startInfo.area || "北京"}】`
-    : startInfo.matchedStation
-      ? `接近【${startInfo.matchedStation}】站`
-      : "还不够明确";
+  const startInfo = detectStartInfo(form.start);
+  const startText = startInfo.matchedStation ? `接近【${startInfo.matchedStation}】站` : `位于【${startInfo.area}】`;
   const targetTransit = firstRoute?.transitEstimate;
-  const base = startInfo.name
-    ? `我识别到你的出发地${startText}。${stationText ? `附近交通站点：${stationText}。` : ""}`
-    : "没有找到唯一匹配地点，请先从候选项中选择，或换成更具体的学校名、地铁站名、商圈名。";
-  if (!targetTransit) return `${base}交通费用会结合地图位置和目的地附近站点估算。`;
+  const base = `我识别到你的出发地${startText}。`;
+  if (!targetTransit) return `${base}交通费用会按区域和目的地附近站点做粗略估算。`;
   if (budget <= 60 && targetTransit.roundTripFare <= 10) {
     return `${base}在 ${budget} 元预算下，交通费需要控制在 10 元左右，所以我优先考虑往返交通较可控的方案。`;
   }
@@ -976,63 +1422,26 @@ function App() {
   const [form, setForm] = useState(initialForm);
   const [results, setResults] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [locationNotice, setLocationNotice] = useState("");
-  const [locationCandidates, setLocationCandidates] = useState([]);
-  const [locationStatus, setLocationStatus] = useState("idle");
 
   function updateForm(key, value) {
     setForm((current) => {
       const next = { ...current, [key]: value };
       if (key === "activities") next.destination = "不指定，让 AI 推荐";
-      if (key === "start") {
-        next.startLocation = null;
-        setLocationCandidates([]);
-        setLocationNotice("");
-        setLocationStatus("idle");
-      }
       return next;
     });
   }
 
-  async function generate(targetForm = form) {
-    setIsGenerating(true);
-    setLocationNotice("");
-    setLocationStatus("resolving");
-    try {
-      const result = await generateRecommendationResult(targetForm);
-      if (!result.routes.length) {
-        setLocationCandidates(result.candidates || []);
-        setLocationNotice(result.message);
-        setLocationStatus(result.candidates?.length ? "ambiguous" : "failed");
-        return;
-      }
-      const nextForm = { ...targetForm, startLocation: result.startLocation, start: result.startLocation.name || targetForm.start };
-      setForm(nextForm);
-      setLocationCandidates([]);
-      setLocationNotice("");
-      setLocationStatus("resolved");
-      setResults(result.routes);
-      setSelectedRoute(result.routes[0]);
-      setPage("results");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  function chooseStartCandidate(candidate) {
-    const nextForm = { ...form, start: candidate.name, startLocation: candidate };
-    setForm(nextForm);
-    setLocationCandidates([]);
-    setLocationNotice(`已选择：${candidate.name}，位于${candidate.district || "北京"}。`);
-    setLocationStatus("resolved");
-    generate(nextForm);
+  function generate() {
+    const recommendations = generateRecommendations(form);
+    setResults(recommendations);
+    setSelectedRoute(recommendations[0]);
+    setPage("results");
   }
 
   return (
     <main className="screen font-sans">
       {page === "home" && <HomePage onStart={() => setPage("form")} />}
-      {page === "form" && <FormPage form={form} updateForm={updateForm} onGenerate={() => generate()} onBack={() => setPage("home")} isGenerating={isGenerating} locationNotice={locationNotice} locationCandidates={locationCandidates} locationStatus={locationStatus} onChooseStartCandidate={chooseStartCandidate} />}
+      {page === "form" && <FormPage form={form} updateForm={updateForm} onGenerate={generate} onBack={() => setPage("home")} />}
       {page === "results" && (
         <ResultPage
           form={form}
@@ -1098,23 +1507,11 @@ function HomePage({ onStart }) {
   );
 }
 
-function FormPage({ form, updateForm, onGenerate, onBack, isGenerating, locationNotice, locationCandidates, locationStatus, onChooseStartCandidate }) {
+function FormPage({ form, updateForm, onGenerate, onBack }) {
   const selectedManualActivities = form.activities.filter((activity) => activity !== aiActivityOption);
   const destinationSourceActivities = selectedManualActivities.length ? selectedManualActivities : ["散步放空"];
   const currentDestinations = keepUnspecifiedDestinationLast(destinationSourceActivities.flatMap((activity) => destinationOptions[activity] || []));
   const startLocation = detectStartInfo(form.start);
-  const resolvedStationText = [...(form.startLocation?.nearestSubwayStations || []), ...(form.startLocation?.nearestBusStops || [])].slice(0, 3).join(" / ");
-  const locationStatusText = locationStatus === "resolving"
-    ? "正在识别你的真实位置..."
-    : form.startLocation
-      ? form.startLocation.type === "subway_station"
-        ? `我识别到你的出发地是【${form.startLocation.name}】，属于北京地铁站。线路：${form.startLocation.subwayLines?.join(" / ") || "以地图实时信息为准"}。主出发站：${form.startLocation.name}。`
-        : `我识别到你的出发地是【${form.startLocation.name}】，位于【${form.startLocation.district || startLocation.area}】。${resolvedStationText ? `推荐出发站：${resolvedStationText}。` : "生成时继续查询附近站点。"}`
-      : locationStatus === "ambiguous"
-        ? "我找到了多个可能位置，请先从下面候选项中选择。"
-        : locationStatus === "failed"
-          ? "没有找到唯一匹配地点，请从候选项中选择，或换成更具体的学校名、校区名、地铁站名。"
-          : "点击生成后，我会用地图解析你的出发地，并优先推荐附近路线。";
   return (
     <section className="mx-auto max-w-7xl px-5 py-8 sm:px-8">
       <HeaderBar title="轻量问卷" subtitle="像和 AI 助手聊天一样，把周末约束告诉它。" onBack={onBack} />
@@ -1129,34 +1526,14 @@ function FormPage({ form, updateForm, onGenerate, onBack, isGenerating, location
           />
           <p className="mt-3 text-sm leading-6 text-slate-500">可以填写学校、宿舍、校门、公交站、地铁站或你当前所在的大致位置。</p>
           <div className="mt-6 rounded-2xl bg-mint/70 p-4">
-            <p className="text-sm font-bold text-leaf">地图位置识别</p>
-            <p className="mt-1 text-lg font-black text-ink">{form.startLocation?.name || startLocation.matchedStation || "等待生成时解析真实位置"}</p>
-            <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">{locationStatusText}</p>
+            <p className="text-sm font-bold text-leaf">AI 粗略识别</p>
+            <p className="mt-1 text-lg font-black text-ink">{startLocation.area}</p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">{startLocation.debugText}</p>
           </div>
-          {locationNotice && <p className="mt-4 rounded-2xl bg-sun/25 p-4 text-sm font-black leading-6 text-ink">{locationNotice}</p>}
-          {locationCandidates?.length > 0 && (
-            <div className="mt-4 space-y-2">
-              <p className="text-sm font-black text-ink">请选择更准确的出发地</p>
-              {locationCandidates.map((candidate) => (
-                <button
-                  key={`${candidate.name}-${candidate.address}`}
-                  type="button"
-                  onClick={() => onChooseStartCandidate(candidate)}
-                  className="w-full rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200 transition hover:ring-leaf"
-                >
-                  <p className="font-black text-ink">{candidate.name}</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-600">{candidate.district} · {candidate.address}</p>
-                  {[...(candidate.nearestSubwayStations || []), ...(candidate.nearbySubwayStations || [])].length > 0 && (
-                    <p className="mt-1 text-xs font-bold text-leaf">推荐出发站：{[...(candidate.nearestSubwayStations || []), ...(candidate.nearbySubwayStations || [])].slice(0, 2).join(" / ")}</p>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
         <QuestionCard title="预算选择">
           <div className="grid choice-grid gap-3">
-            {["30元", "50元", "80元", "100元", "自定义预算"].map((option) => (
+            {["30元", "50元", "80元", "100元", "200元", "自定义预算"].map((option) => (
               <OptionButton key={option} active={form.budgetType === option} onClick={() => updateForm("budgetType", option)}>{option}</OptionButton>
             ))}
           </div>
@@ -1205,9 +1582,7 @@ function FormPage({ form, updateForm, onGenerate, onBack, isGenerating, location
       <div className="sticky bottom-4 mt-7 rounded-[24px] border border-white/70 bg-white/90 p-4 shadow-soft backdrop-blur">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-semibold text-slate-600">当前为原型版本，使用规则匹配模拟 AI 推荐，后续可接入真实地图、天气和大模型 API。</p>
-          <button onClick={onGenerate} disabled={isGenerating} className="rounded-full bg-ink px-7 py-3 font-black text-white transition hover:bg-leaf disabled:cursor-wait disabled:bg-slate-400">
-            {isGenerating ? "正在识别你的真实位置..." : "生成 3 个路线方案"}
-          </button>
+          <button onClick={onGenerate} className="rounded-full bg-ink px-7 py-3 font-black text-white transition hover:bg-leaf">生成 3 个路线方案</button>
         </div>
       </div>
     </section>
@@ -1216,36 +1591,61 @@ function FormPage({ form, updateForm, onGenerate, onBack, isGenerating, location
 
 function ResultPage({ form, results, selectedRoute, setSelectedRoute, onBack, onFeedback }) {
   const budget = getBudgetValue(form);
-  const area = form.startLocation?.district || detectStartArea(form.start || "");
+  const area = detectStartArea(form.start || "");
   const activities = getActivityContext(form, area, budget);
   const cheapest = results[0];
+  const activeRoute = selectedRoute || cheapest;
+  const [resolvedActiveRoute, setResolvedActiveRoute] = useState(activeRoute);
   const decisionNote = trafficDecisionNote(form, cheapest);
   const moodNote = moodDecisionCopy(form, activities, budget, area);
-  const startName = form.startLocation?.name || form.start || "大致位置";
+  const destinationNote = isSpecificDestination(form.destination)
+    ? `你已经明确选择了【${form.destination}】，所以我把三条方案都限定在【${form.destination}】及周边范围内，再根据你的预算、时间、天气、同行人数和心情区分为省钱版、稳妥版和体验升级版。`
+    : "";
+  const weatherNote = hasIndoorNeed(form, getEffectiveMoods(form, area, budget))
+    ? "由于你选择了雨天/室内需求，我优先筛选了室内或室内外结合路线，避免长时间户外停留。"
+    : "";
+  const socialNote = hasSocialNeed(form, getEffectiveMoods(form, area, budget))
+    ? "由于你是多人出行或希望热闹一点，我优先选择了集合方便、餐饮选择多、适合聊天和社交的路线。"
+    : "";
+  const highBudgetNote = budget >= 100
+    ? "你的预算相对充足，所以我保留了省钱方案，同时提供了体验升级方案，避免所有推荐都停留在低配路线。"
+    : "";
+
+  useEffect(() => {
+    let disposed = false;
+    setResolvedActiveRoute(activeRoute);
+    resolveRoutePois(activeRoute).then((resolvedRoute) => {
+      if (!disposed) setResolvedActiveRoute(resolvedRoute);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [activeRoute]);
+
   return (
     <section className="mx-auto max-w-7xl px-5 py-8 sm:px-8">
       <HeaderBar title="AI 路线结果" subtitle="不是推荐最贵的地方，而是推荐真的能执行的周末方案。" onBack={onBack} />
-      <MapDevStatus route={selectedRoute || cheapest} />
       <div className="mt-6 rounded-[28px] bg-ink p-6 text-white shadow-soft">
         <p className="text-sm font-bold text-sun">AI 决策说明</p>
         <p className="mt-3 text-lg leading-8">
-          {moodNote} 根据你从<span className="font-black text-sun">【{startName}】</span>出发、预算
+          {destinationNote || moodNote}{weatherNote}{socialNote}{highBudgetNote} 根据你从<span className="font-black text-sun">【{form.start || "大致位置"}】</span>出发、预算
           <span className="font-black text-sun">【{budget}元】</span>、想要<span className="font-black text-sun">【{formatActivities(activities)}】</span>、时间是
           <span className="font-black text-sun">【{formatTimePreference(form)}】</span>、天气是
-          <span className="font-black text-sun">【{form.weather}】</span>、同行状态是<span className="font-black text-sun">【{form.companion}】</span>，我没有优先推荐高消费路线，而是选择了几条预算更透明、交通相对可控、可以真的执行的轻出行方案。{decisionNote}
+          <span className="font-black text-sun">【{form.weather}】</span>、同行状态是<span className="font-black text-sun">【{form.companion}】</span>，我没有优先推荐高消费路线，而是选择了几条预算更透明、交通相对可控、可以真的执行的轻出行方案。系统粗略判断你的出发区域为
+          <span className="font-black text-sun">【{area}】</span>。{decisionNote}
         </p>
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-5">
           {results.map((route) => (
-            <RouteCard key={route.routeId} route={route} form={form} selected={selectedRoute?.routeId === route.routeId} onSelect={() => setSelectedRoute(route)} />
+            <RouteCard key={route.routeId} route={route} selected={selectedRoute?.routeId === route.routeId} onSelect={() => setSelectedRoute(route)} />
           ))}
         </div>
         <aside className="space-y-5 lg:sticky lg:top-5 lg:self-start">
-          <RealMap route={selectedRoute || cheapest} form={form} />
-          <BudgetBreakdown route={selectedRoute || cheapest} />
-          <AlternativeOptions route={selectedRoute || cheapest} />
+          <BudgetBreakdown route={resolvedActiveRoute || activeRoute} />
+          <RealMap route={resolvedActiveRoute || activeRoute} form={form} />
+          <AlternativeOptions route={resolvedActiveRoute || activeRoute} />
           <button onClick={onFeedback} className="w-full rounded-full bg-leaf px-6 py-4 text-lg font-black text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-ink">
             去做用户反馈验证
           </button>
@@ -1255,26 +1655,31 @@ function ResultPage({ form, results, selectedRoute, setSelectedRoute, onBack, on
   );
 }
 
-function RouteCard({ route, form, selected, onSelect }) {
-  const fullText = buildCopyableRouteText(route, form);
-  const placeText = buildPlaceListText(route);
-  const showPoiNotice = !hasRealAmapPoi(route) && route.mapPoiNotice;
+function RouteCard({ route, selected, onSelect }) {
+  const [displayRoute, setDisplayRoute] = useState(route);
+
+  useEffect(() => {
+    let disposed = false;
+    setDisplayRoute(route);
+    resolveRoutePois(route).then((resolvedRoute) => {
+      if (!disposed) setDisplayRoute(resolvedRoute);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [route]);
+
+  const shownRoute = displayRoute || route;
+
   return (
     <article className={`rounded-[28px] border bg-white/90 p-6 shadow-soft transition ${selected ? "border-leaf ring-4 ring-mint" : "border-white/70"}`}>
-      <div
-        onClick={onSelect}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") onSelect();
-        }}
-        role="button"
-        tabIndex={0}
-        className="w-full text-left outline-none"
-      >
+      <button onClick={onSelect} className="w-full text-left">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-black text-leaf">{route.planType}</p>
             <h2 className="mt-1 text-2xl font-black text-ink">{route.routeName}</h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">{route.category} · 适合：{route.suitableFor.slice(0, 4).join(" / ")}</p>
+            {shownRoute.hasResolvedAmapPois && <p className="mt-2 text-sm font-black text-leaf">已接入高德真实店名</p>}
           </div>
           <div className="grid grid-cols-3 gap-2 text-center sm:min-w-[260px]">
             <Metric label="总花费" value={`${route.estimatedCost}元`} />
@@ -1298,37 +1703,32 @@ function RouteCard({ route, form, selected, onSelect }) {
           {route.moodTradeoffNote && <p><span className="font-black text-leaf">取舍说明：</span>{route.moodTradeoffNote}</p>}
         </div>
         <p className="mt-3 rounded-2xl bg-skysoft/70 p-4 text-sm font-semibold leading-7 text-slate-700">{route.aiNote}</p>
-        {showPoiNotice && <p className="mt-3 rounded-2xl bg-sun/25 p-4 text-sm font-black leading-7 text-ink">{route.mapPoiNotice}</p>}
-      </div>
+      </button>
       <TransitEstimateBlock estimate={route.transitEstimate} />
-      <TransportPlanBlock transport={route.transport} />
-      <LocationDetails route={route} />
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
-        <CopyRouteButton text={fullText} className="w-full rounded-full bg-ink px-5 py-4 text-sm font-black text-white transition hover:bg-leaf">
-          复制完整方案
-        </CopyRouteButton>
-        <CopyRouteButton text={placeText} className="w-full rounded-full bg-leaf px-5 py-4 text-sm font-black text-white transition hover:bg-ink">
-          复制地点清单
-        </CopyRouteButton>
-        <a
-          href={buildAmapSearchUrl(route.destination || route.routeName)}
-          target="_blank"
-          rel="noreferrer"
-          className="w-full rounded-full bg-sun px-5 py-4 text-center text-sm font-black text-ink transition hover:-translate-y-0.5"
-        >
-          查看目的地地图
-        </a>
-      </div>
       <div className="mt-5 grid gap-3">
-        {route.steps.map((step, index) => (
-          <div key={`${step.place}-${index}`} className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[120px_1fr_90px]">
+        {shownRoute.steps.map((step, index) => (
+          <div key={`${step.place}-${index}`} className="grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[120px_1fr_80px_120px]">
             <p className="font-black text-ink">{step.place}</p>
             <div>
               <p className="font-semibold text-slate-700">{step.action}</p>
               <p className="mt-1 text-sm text-slate-500">{step.tip}</p>
-              <p className="mt-2 text-xs font-bold text-slate-500">{step.nearestSubway} · {step.estimatedStay}</p>
+              {step.primaryPoi && (
+                <p className="mt-2 rounded-xl bg-mint/70 px-3 py-2 text-sm font-bold text-slate-700">
+                  高德真实店名：{step.primaryPoi.name} · {step.primaryPoi.address}
+                </p>
+              )}
+              {step.poiStatus && <p className="mt-2 text-sm font-bold text-sun">{step.poiStatus}</p>}
             </div>
             <p className="font-black text-leaf">{step.cost}元</p>
+            <a
+              href={buildAmapNavigationUrl(step)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-black text-leaf underline decoration-2 underline-offset-4"
+              onClick={(event) => event.stopPropagation()}
+            >
+              打开高德地图导航
+            </a>
           </div>
         ))}
       </div>
@@ -1341,152 +1741,16 @@ function RouteCard({ route, form, selected, onSelect }) {
   );
 }
 
-function getCurrentDevUrl() {
-  if (typeof window === "undefined") return "";
-  return `${window.location.protocol}//${window.location.host}`;
-}
-
-function getPortNotice() {
-  if (!import.meta.env.DEV || typeof window === "undefined") return "";
-  const currentPort = window.location.port;
-  if (!currentPort) return "";
-  if (currentPort !== "5173") return `当前页面运行在 ${getCurrentDevUrl()}。如果浏览器还停在 http://127.0.0.1:5173，请切换到这个最新地址。`;
-  return "当前页面运行在 http://127.0.0.1:5173；如果终端提示 Vite 使用了新端口，请以终端最新地址为准。";
-}
-
-function MapDevStatus({ route }) {
-  if (!import.meta.env.DEV) return null;
-  const config = getAmapConfigStatus();
-  const statusText = route?.mapPoiStatus === "map_loaded"
-    ? "已配置高德 Key，正在使用真实 POI。"
-    : route?.mapPoiStatus === "poi_no_result"
-      ? "地图已加载，但附近店铺暂未获取成功，路线主体仍可参考。"
-    : route?.mapPoiStatus
-      ? getAmapPoiFailureMessage(route.mapPoiStatus)
-      : config.label;
-  const portNotice = getPortNotice();
-  return (
-    <section className="mt-6 rounded-2xl bg-white/85 p-4 text-sm font-bold leading-6 text-slate-700 shadow-soft">
-      <p><span className="text-leaf">地图状态：</span>{statusText}</p>
-      {portNotice && <p className="mt-1 text-slate-500">{portNotice}</p>}
-    </section>
-  );
-}
-
-function LocationDetails({ route }) {
-  const locationSteps = route.steps.filter((step) => (
-    step.costType !== "transport"
-    && !["poi_no_result", "poi_unavailable"].includes(step.source)
-    && (step.place || step.name)
-  ));
-  return (
-    <section className="mt-5 rounded-2xl bg-cream/80 p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-black text-leaf">具体位置</p>
-          <h3 className="text-lg font-black text-ink">能直接打开地图的地点清单</h3>
-        </div>
-        <p className="text-sm font-semibold text-slate-600">建议出门前再看一次高德实时导航和店铺状态。</p>
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {locationSteps.map((step) => (
-          <div key={step.id} className="rounded-2xl bg-white/85 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-black text-ink">{step.place}</p>
-                <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{step.address}</p>
-              </div>
-              <span className="shrink-0 rounded-full bg-mint px-3 py-1 text-xs font-black text-leaf">{step.type}</span>
-            </div>
-            <div className="mt-3 grid gap-2 text-sm font-semibold text-slate-600 sm:grid-cols-2">
-              <span>最近地铁：{step.nearestSubway}</span>
-              <span>预计停留：{step.estimatedStay}</span>
-              <span>预计花费：{step.cost}元</span>
-              <span>开放：{step.openTime}</span>
-            </div>
-            {step.primaryPoi && (
-              <div className="mt-3 rounded-2xl bg-mint/70 p-3 text-sm font-semibold leading-6 text-slate-700">
-                <p><span className="font-black text-leaf">首选：</span>{step.primaryPoi.name} · 约 {step.primaryPoi.distance} 米 · {step.primaryPoi.estimatedCost}元</p>
-                {step.alternatives?.length > 0 && <p><span className="font-black text-leaf">备选：</span>{step.alternatives.map((poi) => `${poi.name}（约${poi.estimatedCost}元）`).join(" / ")}</p>}
-              </div>
-            )}
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <a
-                href={buildAmapNavigationUrl(step)}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-full bg-ink px-4 py-3 text-center text-sm font-black text-white"
-              >
-                打开地图
-              </a>
-              <a
-                href={buildAmapSearchUrl(step.amapKeyword || step.place)}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-full bg-white px-4 py-3 text-center text-sm font-black text-leaf ring-1 ring-mint"
-              >
-                地图确认
-              </a>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function TransportPlanBlock({ transport }) {
-  if (!transport) return null;
-  return (
-    <section className="mt-5 rounded-2xl bg-ink p-4 text-white">
-      <p className="text-sm font-black text-sun">真实交通建议</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <div className="rounded-2xl bg-white/10 p-3">
-          <p className="text-xs font-bold text-sun">从哪里出发</p>
-          <p className="mt-1 font-black">{transport.fromName}</p>
-          <p className="mt-1 text-sm font-semibold text-white/80">主出发站：{transport.primaryStartStation?.name || transport.startStation}{transport.primaryStartStation?.lines?.length ? `（${transport.primaryStartStation.lines.join(" / ")}）` : ""}</p>
-        </div>
-        <div className="rounded-2xl bg-white/10 p-3">
-          <p className="text-xs font-bold text-sun">去哪里</p>
-          <p className="mt-1 font-black">{transport.destinationName}</p>
-          <p className="mt-1 text-sm font-semibold text-white/80">主到达站：{transport.primaryEndStation?.name || transport.endStation}{transport.primaryEndStation?.lines?.length ? `（${transport.primaryEndStation.lines.join(" / ")}）` : ""}</p>
-        </div>
-        <div className="rounded-2xl bg-white/10 p-3">
-          <p className="text-xs font-bold text-sun">时间/距离</p>
-          <p className="mt-1 font-black">{transport.estimatedDuration} · {transport.estimatedDistance}</p>
-        </div>
-        <div className="rounded-2xl bg-white/10 p-3">
-          <p className="text-xs font-bold text-sun">交通费</p>
-          <p className="mt-1 font-black">往返约 {transport.estimatedTransportCost} 元</p>
-        </div>
-      </div>
-      <p className="mt-3 text-sm font-semibold leading-6 text-white/85">{transport.transitSummary}</p>
-      {transport.routePlanningNotice && (
-        <p className="mt-2 rounded-2xl bg-white/10 p-3 text-sm font-semibold leading-6 text-white/85">{transport.routePlanningNotice}</p>
-      )}
-      {transport.nearbyBusStops?.length > 0 && (
-        <p className="mt-2 text-xs font-semibold leading-5 text-white/65">
-          附近公交补充：{transport.nearbyBusStops.slice(0, 2).map((stop) => stop.name).join(" / ")}
-        </p>
-      )}
-      {transport.mapRouteUrl && (
-        <a href={transport.mapRouteUrl} target="_blank" rel="noreferrer" className="mt-4 inline-block rounded-full bg-sun px-4 py-3 text-sm font-black text-ink">
-          打开高德路线
-        </a>
-      )}
-    </section>
-  );
-}
-
 function BudgetBreakdown({ route }) {
   if (!route) return null;
-  const budget = calculateRouteBudget(route);
+  const foodCost = route.foodCost;
+  const flexibleCost = route.flexibleCost;
   const items = [
-    ["交通费", budget.transportCost],
-    ["餐饮/饮品", budget.foodCost],
-    ["门票", budget.ticketCost],
-    ["活动消费", budget.activityCost],
-    ["其他", budget.otherCost]
+    ["交通费", route.transportCost],
+    ["餐饮费", foodCost],
+    ["活动费", route.activityCost],
+    ["机动费", flexibleCost],
+    ["升级项", route.upgradeCost || 0]
   ];
   return (
     <section className="rounded-[28px] bg-white/90 p-6 shadow-soft">
@@ -1501,11 +1765,10 @@ function BudgetBreakdown({ route }) {
       </div>
       <div className="mt-4 rounded-2xl bg-ink p-4 text-white">
         <p className="text-sm font-bold text-sun">预计总花费</p>
-        <p className="mt-1 text-4xl font-black">{budget.totalCost}元</p>
+        <p className="mt-1 text-4xl font-black">{route.estimatedCost}元</p>
         <p className="mt-2 text-sm font-bold text-sun">用户预算 {route.userBudget} 元 · 使用率 {route.budgetUsageRate}% · {route.budgetStatus}</p>
         {route.budgetWarning && <p className="mt-2 text-sm font-bold text-sun">可能超预算，建议减少升级项、餐饮或机动费用。</p>}
       </div>
-      <p className="mt-3 text-xs font-semibold leading-5 text-slate-500">交通费为估算值，实际以地图导航和公共交通票价为准。</p>
     </section>
   );
 }
@@ -1737,6 +2000,6 @@ function TextQuestion({ title, value, onChange }) {
   );
 }
 
-export { generateRecommendations, getBudgetTier };
+export { generateRecommendations, getBudgetTargetRange, getBudgetTier, isRouteRelatedToDestination, isSpecificDestination };
 
 export default App;

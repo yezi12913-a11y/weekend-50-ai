@@ -1,34 +1,4 @@
 export const destinationTransitMap = {
-  故宫博物院: {
-    nearbyStations: ["天安门东", "天安门西", "金鱼胡同"],
-    area: "城区交通便利区域",
-    transitZone: "city-center",
-    destinationType: "景点"
-  },
-  景山公园: {
-    nearbyStations: ["中国美术馆", "什刹海", "金鱼胡同"],
-    area: "城区交通便利区域",
-    transitZone: "city-center",
-    destinationType: "公园"
-  },
-  王府井: {
-    nearbyStations: ["王府井", "金鱼胡同", "东单"],
-    area: "城区交通便利区域",
-    transitZone: "city-center",
-    destinationType: "商圈"
-  },
-  南锣鼓巷: {
-    nearbyStations: ["南锣鼓巷", "什刹海"],
-    area: "城区交通便利区域",
-    transitZone: "city-center",
-    destinationType: "街区"
-  },
-  天坛公园: {
-    nearbyStations: ["天坛东门", "桥湾"],
-    area: "城区交通便利区域",
-    transitZone: "city-center",
-    destinationType: "公园"
-  },
   三里屯: {
     nearbyStations: ["团结湖", "农业展览馆", "东大桥"],
     area: "朝阳/东部区域",
@@ -89,18 +59,6 @@ export const destinationTransitMap = {
     transitZone: "west-north",
     destinationType: "公园"
   },
-  圆明园: {
-    nearbyStations: ["圆明园", "北京大学东门"],
-    area: "海淀高校区",
-    transitZone: "northwest",
-    destinationType: "公园"
-  },
-  颐和园: {
-    nearbyStations: ["北宫门", "西苑"],
-    area: "海淀高校区",
-    transitZone: "northwest",
-    destinationType: "公园"
-  },
   玉渊潭: {
     nearbyStations: ["军事博物馆", "公主坟"],
     area: "城区/西部区域",
@@ -124,30 +82,6 @@ export const destinationTransitMap = {
     area: "城区交通便利区域",
     transitZone: "southwest-central",
     destinationType: "小吃街"
-  },
-  前门: {
-    nearbyStations: ["前门", "珠市口"],
-    area: "城区交通便利区域",
-    transitZone: "city-center",
-    destinationType: "街区"
-  },
-  陶然亭: {
-    nearbyStations: ["陶然亭", "北京南站"],
-    area: "城区交通便利区域",
-    transitZone: "southwest-central",
-    destinationType: "公园"
-  },
-  通州运河: {
-    nearbyStations: ["通州北苑", "北运河西"],
-    area: "通州区域",
-    transitZone: "east-far",
-    destinationType: "河边"
-  },
-  亦庄文化园: {
-    nearbyStations: ["亦庄文化园"],
-    area: "大兴/南部区域",
-    transitZone: "south",
-    destinationType: "街区"
   },
   护国寺: {
     nearbyStations: ["平安里", "新街口"],

@@ -1,4 +1,5 @@
 import { beijingSubwayStations } from "./data/beijingSubwayStations.js";
+import { beijingUniversities } from "./data/beijingUniversities.js";
 
 const specificPlacePattern = /学校东门|宿舍楼|校区|公寓|小区|校门|东门|西门|南门|北门/;
 
@@ -9,10 +10,8 @@ const areaFallbackRules = [
   { pattern: /传媒大学|中国传媒大学|朝阳|定福庄|管庄|国贸|望京|三里屯|朝阳大悦城|合生汇|798|青年路|团结湖|亮马桥|将台/, area: "朝阳/东部区域", transitZone: "east" },
   { pattern: /石景山|首钢|苹果园|古城|金安桥/, area: "石景山区域", transitZone: "west" },
   { pattern: /通州|梨园|土桥|北苑/, area: "通州区域", transitZone: "east-far" },
-  { pattern: /亦庄|荣京东街|同济南路|经海路|旧宫/, area: "大兴/南部区域", transitZone: "south" },
-  { pattern: /北京南站|丰台|陶然亭|菜市口|天坛|蒲黄榆/, area: "城区交通便利区域", transitZone: "southwest-central" },
   { pattern: /大兴|西红门|黄村/, area: "大兴/南部区域", transitZone: "south" },
-  { pattern: /西直门|北京站|北京西站|前门|东单|西单|牛街|护国寺|平安里|广安门内|什刹海|南锣鼓巷|奥林匹克公园|森林公园南门/, area: "城区交通便利区域", transitZone: "city-center" }
+  { pattern: /西直门|北京站|北京南站|北京西站|前门|东单|西单|牛街|护国寺|平安里|广安门内|什刹海|南锣鼓巷|奥林匹克公园|森林公园南门/, area: "城区交通便利区域", transitZone: "city-center" }
 ];
 
 function normalizeStartText(input) {
@@ -35,6 +34,37 @@ function stationTokens(station) {
   return [station.name, ...(station.aliases || [])].map((value) => normalizeStartText(value));
 }
 
+function normalizeUniversityText(input) {
+  return normalizeStartText(input)
+    .replace(/本部/g, "")
+    .replace(/北京市/g, "")
+    .replace(/北京/g, "");
+}
+
+function universityAliases(university) {
+  return [university.name, ...(university.aliases || [])];
+}
+
+function campusAliases(university, campus) {
+  return [
+    campus.name,
+    `${university.name}${campus.name.replace(university.name, "")}`,
+    ...(campus.aliases || [])
+  ].filter(Boolean);
+}
+
+function universityArea(region, district) {
+  if (region === "海淀") return { area: "海淀高校区", transitZone: "northwest" };
+  if (region === "朝阳") return { area: "朝阳/东部区域", transitZone: "east" };
+  if (region === "昌平") return { area: "昌平/沙河区域", transitZone: "north-far" };
+  if (region === "房山") return { area: "房山/良乡区域", transitZone: "southwest-far" };
+  if (region === "通州") return { area: "通州区域", transitZone: "east-far" };
+  if (region === "大兴") return { area: "大兴/南部区域", transitZone: "south" };
+  if (region === "石景山") return { area: "石景山区域", transitZone: "west" };
+  if (/丰台|西城|东城/.test(district || "")) return { area: "城区交通便利区域", transitZone: "city-center" };
+  return { area: "通用区域", transitZone: "unknown" };
+}
+
 function byLongerStationName(a, b) {
   return b.name.length - a.name.length;
 }
@@ -52,6 +82,34 @@ function findStation(input) {
   );
 }
 
+function findUniversityCampus(input) {
+  const normalized = normalizeUniversityText(input);
+  if (!normalized) return null;
+
+  for (const university of beijingUniversities) {
+    for (const campus of university.campuses || []) {
+      const aliases = campusAliases(university, campus).map(normalizeUniversityText);
+      if (aliases.includes(normalized)) return { university, campus };
+    }
+  }
+
+  for (const university of beijingUniversities) {
+    const aliases = universityAliases(university).map(normalizeUniversityText);
+    if (aliases.includes(normalized)) return { university, campus: university.campuses?.[0] };
+  }
+
+  for (const university of beijingUniversities) {
+    for (const campus of university.campuses || []) {
+      const aliases = [...universityAliases(university), ...campusAliases(university, campus)].map(normalizeUniversityText);
+      if (aliases.some((alias) => alias && (normalized.includes(alias) || alias.includes(normalized)))) {
+        return { university, campus };
+      }
+    }
+  }
+
+  return null;
+}
+
 function fallbackArea(input) {
   const text = normalizeStartText(input);
   return areaFallbackRules.find((rule) => rule.pattern.test(text));
@@ -66,10 +124,38 @@ function stationResult(input, station) {
     matchedStation: station.name,
     matchedStationInfo: station,
     lines: station.lines,
+    nearbySubwayStations: [`${station.name}站`],
+    nearbyBusStops: [],
     convenience: station.convenience,
     isSpecificPlace: false,
     confidence: "station",
     debugText: `已识别：${station.name}｜${station.lines.join("、")}｜${station.area}｜交通便利度：${station.convenience}`
+  };
+}
+
+function universityResult(input, match) {
+  const { university, campus } = match;
+  const subwayStations = campus.nearbySubwayStations || [];
+  const primarySubway = subwayStations[0]?.replace(/站$/, "") || "";
+  const station = primarySubway ? findStation(primarySubway) : null;
+  const fallback = universityArea(campus.region, campus.district);
+
+  return {
+    originalInput: input,
+    input,
+    area: station?.area || fallback.area,
+    transitZone: station?.transitZone || fallback.transitZone,
+    matchedStation: station?.name || primarySubway || null,
+    matchedStationInfo: station,
+    lines: station?.lines || [],
+    nearbySubwayStations: subwayStations,
+    nearbyBusStops: campus.nearbyBusStops || [],
+    convenience: station?.convenience || "中",
+    isSpecificPlace: true,
+    confidence: "university",
+    universityName: university.name,
+    campusName: campus.name,
+    debugText: `已识别：${campus.name}｜附近地铁：${subwayStations.join("、") || "待地图确认"}｜附近公交：${(campus.nearbyBusStops || []).join("、") || "待地图确认"}`
   };
 }
 
@@ -82,6 +168,8 @@ function areaResult(input, fallback) {
     matchedStation: null,
     matchedStationInfo: null,
     lines: [],
+    nearbySubwayStations: [],
+    nearbyBusStops: [],
     convenience: "未知",
     isSpecificPlace: specificPlacePattern.test(normalizeStartText(input)),
     confidence: "area",
@@ -98,6 +186,8 @@ function unknownResult(input) {
     matchedStation: null,
     matchedStationInfo: null,
     lines: [],
+    nearbySubwayStations: [],
+    nearbyBusStops: [],
     convenience: "未知",
     isSpecificPlace: specificPlacePattern.test(normalizeStartText(input)),
     confidence: "unknown",
@@ -106,8 +196,16 @@ function unknownResult(input) {
 }
 
 export function detectStartLocation(input) {
+  if (/校区/.test(normalizeStartText(input))) {
+    const campusUniversity = findUniversityCampus(input);
+    if (campusUniversity?.campus) return universityResult(input, campusUniversity);
+  }
+
   const station = findStation(input);
   if (station) return stationResult(input, station);
+
+  const university = findUniversityCampus(input);
+  if (university?.campus) return universityResult(input, university);
 
   const fallback = fallbackArea(input);
   if (fallback) return areaResult(input, fallback);
