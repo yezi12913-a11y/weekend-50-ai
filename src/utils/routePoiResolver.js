@@ -24,6 +24,10 @@ const destinationCenters = {
 };
 
 const expensivePoiWords = ["酒吧", "西餐", "牛排", "日料", "烧肉", "海鲜", "私房菜", "高端", "会所"];
+const diningNameWords = ["餐", "饭", "面", "粉", "饺", "馄饨", "米线", "小吃", "快餐", "麦当劳", "肯德基", "鸡柳", "鸡排", "汉堡", "火锅", "烤肉", "中餐", "食堂"];
+const drinkNameWords = ["便利店", "便利蜂", "罗森", "7-ELEVEn", "全家", "咖啡", "奶茶", "甜品", "饮品", "瑞幸", "库迪", "蜜雪冰城", "茶百道"];
+const playableNameWords = ["展", "美术馆", "博物馆", "艺术中心", "影院", "电影", "公园", "街区", "商场", "书店"];
+const closedPoiWords = ["暂停营业", "已关闭", "永久关闭", "停业", "歇业", "装修中", "暂停开放", "闭店"];
 
 export function stepNeedsRealPoi(step) {
   const text = `${step.place || ""} ${step.action || ""}`;
@@ -33,8 +37,10 @@ export function stepNeedsRealPoi(step) {
 export function buildPoiKeywordForStep(route, step) {
   const destination = route?.destination || "北京";
   const text = `${step.place || ""} ${step.action || ""}`;
+  const budget = Number(route?.userBudget || 0);
   if (/咖啡|奶茶|甜品|饮品|舒适停留/.test(text)) return `${destination} 咖啡 甜品 奶茶`;
   if (/便利店|补给/.test(text)) return `${destination} 便利店 饮品`;
+  if (budget >= 150 && /正餐|餐|吃|小吃|轻食|简餐/.test(text)) return `${destination} 正餐 中餐 餐厅`;
   if (/正餐|餐|吃|小吃|轻食|简餐/.test(text)) return `${destination} 平价简餐 小吃 快餐`;
   if (/体验升级|电影|展/.test(text)) return `${destination} 咖啡 甜品 展览 电影`;
   return `${destination} ${step.place || ""}`;
@@ -61,9 +67,49 @@ function normalizePoi(poi, fallbackCost) {
   };
 }
 
-function isUsablePoi(poi) {
+export function isDiningPoi(poi) {
   const text = `${poi.name || ""}${poi.type || ""}`;
-  return poi.name && poi.location && !expensivePoiWords.some((word) => text.includes(word));
+  return !/家电|电子|数码|购物服务|生活服务|汽车|房产|公司|政府/.test(text)
+    && (/餐饮服务/.test(text) || diningNameWords.some((word) => text.includes(word)));
+}
+
+export function isDrinkPoi(poi) {
+  const text = `${poi.name || ""}${poi.type || ""}`;
+  return !/家电|电子|数码|汽车|房产|公司|政府/.test(text)
+    && (/餐饮服务|购物服务;便利店/.test(text) || drinkNameWords.some((word) => text.includes(word)));
+}
+
+export function isOpenPoi(poi) {
+  const text = `${poi.name || ""}${poi.type || ""}${poi.address || ""}${poi.biz_ext?.open_time || ""}`;
+  return !closedPoiWords.some((word) => text.includes(word));
+}
+
+export function isPlayablePoi(poi) {
+  const text = `${poi.name || ""}${poi.type || ""}`;
+  return isOpenPoi(poi)
+    && !/家电|电子|数码|汽车|房产|公司|政府|维修|批发/.test(text)
+    && (/科教文化服务|风景名胜|体育休闲服务|购物服务;商场|电影院/.test(text) || playableNameWords.some((word) => text.includes(word)));
+}
+
+function keywordRequiresDrink(keyword) {
+  return /咖啡|甜品|奶茶|饮品|便利店/.test(keyword);
+}
+
+function keywordRequiresDining(keyword) {
+  return /正餐|餐厅|简餐|小吃|快餐|中餐/.test(keyword);
+}
+
+function keywordRequiresPlayable(keyword) {
+  return /展览|电影|影院|美术馆|博物馆|游玩/.test(keyword);
+}
+
+function isUsablePoi(poi, keyword) {
+  const text = `${poi.name || ""}${poi.type || ""}`;
+  if (!poi.name || !poi.location || !isOpenPoi(poi) || expensivePoiWords.some((word) => text.includes(word))) return false;
+  if (keywordRequiresDining(keyword)) return isDiningPoi(poi);
+  if (keywordRequiresDrink(keyword)) return isDrinkPoi(poi);
+  if (keywordRequiresPlayable(keyword)) return isPlayablePoi(poi);
+  return true;
 }
 
 async function searchPoi(keyword, fallbackCost) {
@@ -75,7 +121,7 @@ async function searchPoi(keyword, fallbackCost) {
   });
   const pois = Array.isArray(data?.pois) ? data.pois : [];
   return pois
-    .filter(isUsablePoi)
+    .filter((poi) => isUsablePoi(poi, keyword))
     .map((poi) => normalizePoi(poi, fallbackCost))
     .find((poi) => Number.isFinite(poi.lat) && Number.isFinite(poi.lng));
 }

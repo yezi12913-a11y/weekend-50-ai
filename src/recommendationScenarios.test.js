@@ -221,3 +221,40 @@ test("unspecified AI recommendation still obeys rainy group lively constraints",
     assert.ok(!/图书馆|安静学习|一个人独处/.test(routeText(route)), route.routeName);
   });
 });
+
+test("strict mixed constraints still return three recommendation plans", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    start: "北京工商大学良乡校区",
+    customBudget: "200",
+    time: "只想出去 2-3 小时",
+    activities: ["雨天室内", "逛街", "吃东西", "安静学习"],
+    destination: "不指定，让 AI 推荐",
+    weather: "雨天",
+    companion: "多人",
+    moods: ["想找室内地方", "想和朋友热闹一点", "想吃点好的"]
+  }));
+
+  assert.equal(routes.length, 3);
+});
+
+test("higher food budget rises with a 200 yuan eating request", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    customBudget: "200",
+    activities: ["吃东西", "逛街"],
+    companion: "多人",
+    moods: ["想吃点好的"]
+  }));
+
+  assert.equal(routes.length, 3);
+  assert.ok(routes[0].foodCost >= 65);
+  assert.ok(routes[1].foodCost >= 85);
+  assert.ok(routes[2].foodCost >= 100);
+  routes.forEach((route) => {
+    const eatingSteps = route.steps.filter((step) => /餐|吃|小吃|正餐|简餐/.test(`${step.place}${step.action}`));
+    eatingSteps.forEach((step) => {
+      assert.doesNotMatch(`${step.place}${step.action}${step.tip}`, /便利店|超市|自带水/, route.routeName);
+    });
+  });
+});

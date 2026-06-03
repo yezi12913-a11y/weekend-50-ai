@@ -1100,7 +1100,10 @@ function foodCostFor(route, form, tier, planType, remainingAfterTraffic) {
   const companionBoost = form.companion === "多人" ? 1.12 : form.companion === "双人" ? 1.05 : 0.95;
   const moodBoost = moods.includes("想吃点好的") ? 1.35 : moods.includes("想省钱") ? 0.72 : 1;
   const planBoost = planType === "cheap" ? 0.72 : planType === "steady" ? 1 : 1.25;
-  const tierMin = { veryLow: 8, low: 16, normal: 28, comfortable: 45, high: 65 }[tier.key];
+  let tierMin = { veryLow: 8, low: 16, normal: 28, comfortable: 45, high: 65 }[tier.key];
+  if (tier.key === "high" && moods.includes("想吃点好的")) {
+    tierMin = planType === "cheap" ? 65 : planType === "steady" ? 90 : 110;
+  }
   const tierMax = { veryLow: 24, low: 45, normal: 80, comfortable: 130, high: 190 }[tier.key];
   const routeBase = routeContains(route, ["牛街", "护国寺", "吃东西", "美食", "B1"]) ? route.foodCost + 12 : route.foodCost;
   const raw = routeBase * companionBoost * moodBoost * planBoost;
@@ -1286,6 +1289,7 @@ function createDestinationFallbackRoute(destination, planType, index, form) {
   const terms = getDestinationGroupTerms(destination);
   const nearby = terms.filter((term) => term !== destination).slice(0, 3);
   const nearbyText = nearby.length ? nearby.join("、") : "周边公共空间";
+  const budget = getBudgetValue(form);
   const isIndoor = /合生汇|大悦城|荟聚|商场|书店|图书馆|咖啡|展|美术馆|典籍|电影/.test(destination);
   const isFood = /牛街|护国寺|簋街|美食|B1|吃/.test(destination);
   const isPark = /公园|玉渊潭|紫竹院|奥森|北海/.test(destination);
@@ -1295,11 +1299,17 @@ function createDestinationFallbackRoute(destination, planType, index, form) {
     steady: `${destination}稳妥版`,
     vibe: `${destination}体验升级版`
   };
-  const foodAction = planType === "cheap"
-    ? "选择便利店、平价小吃或自带水，把消费点控制在一个以内"
-    : planType === "steady"
-      ? "安排一顿简餐或小吃，先看价格再进店"
-      : "根据预算选择正餐、甜品、咖啡或特色小吃作为升级点";
+  const foodAction = budget >= 150
+    ? planType === "cheap"
+      ? "选择平价餐馆、真实餐厅或连锁小吃店，把吃饭预算花在正经餐饮上"
+      : planType === "steady"
+        ? "安排一顿真实餐厅或商场餐饮，优先餐馆、小吃店或连锁品牌"
+        : "根据预算选择正餐、甜品、咖啡或特色小吃店作为升级点"
+    : planType === "cheap"
+      ? "选择平价小吃或连锁快餐，把消费点控制在一个以内"
+      : planType === "steady"
+        ? "安排一顿简餐或小吃，先看价格再进店"
+        : "根据预算选择正餐、甜品、咖啡或特色小吃作为升级点";
   const mainAction = isPark
     ? "把主要时间放在散步、坐着放空和低压力聊天"
     : isFood
