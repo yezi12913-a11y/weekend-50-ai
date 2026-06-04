@@ -5,15 +5,19 @@ import {
   buildPoiKeywordForStep,
   filterDrinkPois,
   filterFoodPois,
+  filterPoisByDestinationGroup,
+  getDestinationGroup,
   getFoodTierByBudget,
   isDiningPoi,
   isDrinkPoi,
   isFoodPoi,
   isOpenPoi,
+  isPoiAllowedForDestination,
   isPlayablePoi,
   isPublicRestPoi,
   isRetailOnlyPoi,
   filterPublicRestPois,
+  sanitizePlanForDestination,
   selectFoodPoiByPlanType
 } from "./utils/routePoiResolver.js";
 
@@ -143,4 +147,46 @@ test("walking photo and rest step keywords prefer public spaces", () => {
 
   assert.match(keyword, /公园|广场|街区|公共空间|文化|商场/);
   assert.doesNotMatch(keyword, /小学|幼儿园|小区|社区|村|住宅/);
+});
+
+test("Blue Harbor destination group filters POIs and rejects unrelated fallbacks", () => {
+  const group = getDestinationGroup("蓝色港湾");
+  const pois = [
+    { name: "麦当劳（西单附近）", type: "餐饮服务;快餐厅", address: "北京市西城区西单北大街" },
+    { name: "西单大悦城公共休息区", type: "购物服务;商场", address: "北京市西城区西单北大街131号" },
+    { name: "三里屯太古里公共休息区", type: "购物服务;商场", address: "北京市朝阳区三里屯路" },
+    { name: "蓝色港湾附近平价餐饮", type: "餐饮服务;快餐厅", address: "北京市朝阳区蓝色港湾" },
+    { name: "SOLANA 商区公共空间", type: "购物服务;商场", address: "北京市朝阳区蓝色港湾商区" },
+    { name: "亮马河短暂停留点", type: "风景名胜;风景名胜相关", address: "北京市朝阳区亮马河沿线" }
+  ];
+
+  assert.ok(group);
+  assert.equal(isPoiAllowedForDestination(pois[0], "蓝色港湾"), false);
+  assert.equal(isPoiAllowedForDestination(pois[1], "蓝色港湾"), false);
+  assert.deepEqual(filterPoisByDestinationGroup(pois, "蓝色港湾").map((poi) => poi.name), [
+    "蓝色港湾附近平价餐饮",
+    "SOLANA 商区公共空间",
+    "亮马河短暂停留点"
+  ]);
+});
+
+test("sanitizes explicit Blue Harbor plans so steps cannot point to Xidan", () => {
+  const plan = {
+    routeName: "蓝色港湾省钱版",
+    destination: "蓝色港湾",
+    relatedDestinations: ["蓝色港湾"],
+    nearbyDestinations: ["亮马河"],
+    steps: [
+      { place: "西单大悦城公共休息区", action: "休息", cost: 0, tip: "错误兜底" },
+      { place: "麦当劳（西单附近）", action: "选择平价小吃", cost: 22, tip: "错误餐饮" },
+      { place: "便利蜂（西单附近）", action: "买水补给", cost: 10, tip: "错误饮品" }
+    ]
+  };
+
+  const sanitized = sanitizePlanForDestination(plan, "蓝色港湾");
+  const text = sanitized.steps.map((step) => `${step.place}${step.action}${step.tip}${step.amapKeyword || ""}`).join(" ");
+
+  assert.equal(sanitized.destination, "蓝色港湾");
+  assert.doesNotMatch(text, /西单|西单大悦城|麦当劳（西单附近）|便利蜂（西单附近）/);
+  assert.match(text, /蓝色港湾|SOLANA|亮马河|枣营|亮马桥/);
 });

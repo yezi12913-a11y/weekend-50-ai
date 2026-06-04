@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createServer } from "vite";
+import { buildCopyableRouteText } from "./utils/mapLinks.js";
 
 let appModule;
 
@@ -58,7 +59,7 @@ function isPureOutdoorRoute(route) {
 
 function assertRoutesStayInDestinationGroup(routes, groupTerms, forbiddenTerms) {
   routes.forEach((route) => {
-    const text = routeText(route);
+    const text = `${routeText(route)} ${buildCopyableRouteText(route, { start: "外交学院" })}`;
     assert.ok(groupTerms.some((term) => text.includes(term)), `${route.routeName} should stay in ${groupTerms.join("/")}`);
     assert.doesNotMatch(text, new RegExp(forbiddenTerms.join("|")), `${route.routeName} should not mention unrelated destinations`);
   });

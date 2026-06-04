@@ -36,6 +36,164 @@ const foodStepPattern = /吃饭|正餐|简餐|小吃|餐饮|午餐|晚餐|吃点
 const drinkStepPattern = /喝水|买水|饮料|奶茶|咖啡|休息补给|补给|饮品|甜品/;
 const publicRestStepPattern = /散步|休息|打卡|拍照|放空|坐一会|坐着|停留|公共空间|公共区|湖边|河边|街区|广场|公园|橱窗|夜景|漫游|慢走/;
 
+function lockedFallback(name, address, lat, lng, estimatedCost, type) {
+  return {
+    name,
+    address,
+    lat,
+    lng,
+    estimatedCost,
+    cost: estimatedCost,
+    type,
+    source: "destination_locked_fallback",
+    amapKeyword: name,
+    whyRecommended: "这是明确目的地锁定后的组内兜底地点。"
+  };
+}
+
+const destinationPoiGroups = {
+  蓝色港湾: {
+    aliases: ["蓝色港湾", "SOLANA", "SOLANA蓝色港湾", "SOLANA 蓝色港湾", "蓝色港湾商区"],
+    allowedKeywords: ["蓝色港湾", "SOLANA", "枣营", "亮马桥", "亮马河", "朝阳公园"],
+    forbiddenKeywords: ["西单", "合生汇", "三里屯", "798", "牛街", "奥森", "首钢园", "什刹海", "护国寺", "五道营"],
+    fallbackPois: {
+      rest: [
+        lockedFallback("蓝色港湾公共休息区", "北京市朝阳区朝阳公园路6号蓝色港湾商区", 39.9483, 116.4747, 0, "购物服务;商场"),
+        lockedFallback("SOLANA 商区公共空间", "北京市朝阳区蓝色港湾商区", 39.9485, 116.475, 0, "购物服务;商场"),
+        lockedFallback("亮马河短暂停留点", "北京市朝阳区亮马河沿线", 39.9494, 116.4708, 0, "风景名胜;风景名胜相关")
+      ],
+      food: [
+        lockedFallback("蓝色港湾附近平价餐饮", "北京市朝阳区蓝色港湾商区", 39.9484, 116.4746, 38, "餐饮服务;快餐厅"),
+        lockedFallback("SOLANA 商区美食区", "北京市朝阳区蓝色港湾商区", 39.9485, 116.475, 45, "餐饮服务;中餐厅"),
+        lockedFallback("枣营附近简餐", "北京市朝阳区枣营地铁站周边", 39.9448, 116.4743, 32, "餐饮服务;快餐厅")
+      ],
+      drink: [
+        lockedFallback("蓝色港湾附近咖啡店", "北京市朝阳区蓝色港湾商区", 39.9484, 116.4747, 22, "餐饮服务;咖啡厅"),
+        lockedFallback("SOLANA 附近奶茶店", "北京市朝阳区蓝色港湾商区", 39.9485, 116.475, 18, "餐饮服务;饮品店"),
+        lockedFallback("枣营附近便利店", "北京市朝阳区枣营地铁站周边", 39.9448, 116.4743, 12, "购物服务;便利店")
+      ],
+      photo: [
+        lockedFallback("蓝色港湾灯光广场", "北京市朝阳区蓝色港湾商区", 39.9487, 116.4749, 0, "风景名胜;公园广场"),
+        lockedFallback("SOLANA 街区外摆区", "北京市朝阳区蓝色港湾商区", 39.9485, 116.475, 0, "购物服务;商场"),
+        lockedFallback("亮马河夜景点", "北京市朝阳区亮马河沿线", 39.9494, 116.4708, 0, "风景名胜;风景名胜相关")
+      ]
+    }
+  },
+  三里屯: {
+    aliases: ["三里屯", "太古里", "三里屯太古里"],
+    allowedKeywords: ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆", "亮马河"],
+    forbiddenKeywords: ["西单", "合生汇", "798", "牛街", "奥森", "首钢园"],
+    fallbackPois: {
+      rest: [lockedFallback("三里屯太古里公共休息区", "北京市朝阳区三里屯路19号", 39.9367, 116.4551, 0, "购物服务;商场")],
+      food: [lockedFallback("三里屯附近平价餐饮", "北京市朝阳区三里屯路", 39.9367, 116.4551, 40, "餐饮服务;快餐厅")],
+      drink: [lockedFallback("三里屯附近咖啡店", "北京市朝阳区三里屯路", 39.9367, 116.4551, 24, "餐饮服务;咖啡厅")],
+      photo: [lockedFallback("三里屯太古里外街", "北京市朝阳区三里屯路19号", 39.9367, 116.4551, 0, "购物服务;商场")]
+    }
+  },
+  "798": {
+    aliases: ["798", "798艺术区", "UCCA"],
+    allowedKeywords: ["798", "UCCA", "酒仙桥", "将台", "望京南", "高家园"],
+    forbiddenKeywords: ["西单", "合生汇", "三里屯", "牛街", "奥森", "首钢园"],
+    fallbackPois: {
+      rest: [lockedFallback("798艺术区公共空间", "北京市朝阳区酒仙桥路2号", 39.9841, 116.4955, 0, "科教文化服务;文化宫")],
+      food: [lockedFallback("798附近平价餐饮", "北京市朝阳区酒仙桥路2号", 39.9841, 116.4955, 38, "餐饮服务;快餐厅")],
+      drink: [lockedFallback("798附近咖啡店", "北京市朝阳区酒仙桥路2号", 39.9841, 116.4955, 24, "餐饮服务;咖啡厅")],
+      photo: [lockedFallback("798工业风街区", "北京市朝阳区酒仙桥路2号", 39.9841, 116.4955, 0, "风景名胜;风景名胜相关")]
+    }
+  }
+};
+
+function textForDestinationLock(item) {
+  return `${item?.name || ""}${item?.place || ""}${item?.action || ""}${item?.tip || ""}${item?.address || ""}${item?.amapKeyword || ""}${item?.type || ""}${item?.primaryPoi?.name || ""}${item?.primaryPoi?.address || ""}`;
+}
+
+export function getDestinationGroup(destination) {
+  const text = String(destination || "").trim();
+  if (!text || text.includes("不指定")) return null;
+  return Object.entries(destinationPoiGroups).find(([name, group]) => name === text || group.aliases.some((alias) => text.includes(alias) || alias.includes(text)))?.[1] || null;
+}
+
+export function isPoiAllowedForDestination(poi, selectedDestination) {
+  const group = getDestinationGroup(selectedDestination);
+  if (!group) return true;
+  const text = textForDestinationLock(poi);
+  if (!text) return false;
+  if (group.forbiddenKeywords.some((word) => text.includes(word))) return false;
+  return [...group.aliases, ...group.allowedKeywords].some((word) => text.includes(word));
+}
+
+export function filterPoisByDestinationGroup(pois, selectedDestination) {
+  const group = getDestinationGroup(selectedDestination);
+  if (!group) return pois || [];
+  return (pois || []).filter((poi) => isPoiAllowedForDestination(poi, selectedDestination));
+}
+
+function fallbackKindForStep(step) {
+  if (stepNeedsFood(step)) return "food";
+  if (stepNeedsDrink(step)) return "drink";
+  if (/拍照|打卡|夜景|橱窗|漫游/.test(`${step?.place || ""}${step?.action || ""}${step?.tip || ""}`)) return "photo";
+  return "rest";
+}
+
+function fallbackPoiForDestinationStep(selectedDestination, step, selectedPois = new Set()) {
+  const group = getDestinationGroup(selectedDestination);
+  if (!group) return null;
+  const kind = fallbackKindForStep(step);
+  const candidates = [...(group.fallbackPois[kind] || []), ...(group.fallbackPois.rest || [])];
+  return candidates.find((poi) => !selectedPois.has(poi.name)) || candidates[0] || null;
+}
+
+function stepAllowedForDestination(step, selectedDestination) {
+  const group = getDestinationGroup(selectedDestination);
+  if (!group) return true;
+  if (!step || isForbiddenPrivatePlacePoi(step)) return false;
+  return isPoiAllowedForDestination(step, selectedDestination);
+}
+
+export function sanitizePlanForDestination(plan, selectedDestination) {
+  const group = getDestinationGroup(selectedDestination);
+  if (!plan || !group) return plan;
+  const selected = String(selectedDestination || plan.destination || "").trim();
+  const used = new Set();
+  const steps = (plan.steps || []).map((step) => {
+    if (stepAllowedForDestination(step, selected)) {
+      if (step.place) used.add(step.place);
+      return step;
+    }
+    const fallback = fallbackPoiForDestinationStep(selected, step, used);
+    if (!fallback) return null;
+    used.add(fallback.name);
+    return {
+      ...step,
+      place: fallback.name,
+      address: fallback.address,
+      lat: fallback.lat,
+      lng: fallback.lng,
+      amapKeyword: fallback.name,
+      source: fallback.source,
+      primaryPoi: {
+        name: fallback.name,
+        address: fallback.address,
+        lat: fallback.lat,
+        lng: fallback.lng,
+        estimatedCost: fallback.estimatedCost
+      },
+      cost: Number.isFinite(step.cost) ? step.cost : fallback.estimatedCost,
+      tip: `已锁定在${selected}目的地组内。${step.tip || ""}`,
+      whyRecommended: `明确选择${selected}后，地点必须位于该目的地或允许周边。`
+    };
+  }).filter(Boolean);
+
+  return {
+    ...plan,
+    destination: selected,
+    destinationLock: selected,
+    relatedDestinations: [...new Set([selected, ...group.allowedKeywords])],
+    nearbyDestinations: group.allowedKeywords.filter((term) => term !== selected),
+    steps
+  };
+}
+
 export function stepNeedsRealPoi(step) {
   const text = `${step.place || ""} ${step.action || ""}`;
   return /餐|吃|小吃|轻食|简餐|饮品|便利店|咖啡|奶茶|甜品|正餐|补给|舒适停留|体验升级/.test(text)
@@ -243,6 +401,9 @@ function fallbackGroupForDestination(destination) {
 }
 
 function fallbackPoiForStep(route, step, selectedPois) {
+  const lockedFallback = fallbackPoiForDestinationStep(route?.destinationLock, step, selectedPois);
+  if (lockedFallback) return lockedFallback;
+
   const group = fallbackGroupForDestination(route?.destination);
   const tier = getFoodTierByBudget(Number(route?.userBudget || 50), route?.fallbackPlanType || route?.foodPoiPlanType);
   const foodFallbacks = [
@@ -277,7 +438,7 @@ async function searchPoi(keyword, fallbackCost, route, step) {
   });
   const pois = Array.isArray(data?.pois) ? data.pois : [];
   const selected = new Set(route?.usedFoodPoiNames || []);
-  const usable = pois.filter((poi) => isUsablePoi(poi, keyword));
+  const usable = filterPoisByDestinationGroup(pois.filter((poi) => isUsablePoi(poi, keyword)), route?.destinationLock);
   const selectedPoi = keywordRequiresDrink(keyword) && !keywordRequiresDining(keyword)
     ? selectDrinkPoi(usable, selected)
     : keywordRequiresDining(keyword)
