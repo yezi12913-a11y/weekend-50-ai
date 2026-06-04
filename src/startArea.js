@@ -14,6 +14,18 @@ const areaFallbackRules = [
   { pattern: /西直门|北京站|北京南站|北京西站|前门|东单|西单|牛街|护国寺|平安里|广安门内|什刹海|南锣鼓巷|奥林匹克公园|森林公园南门/, area: "城区交通便利区域", transitZone: "city-center" }
 ];
 
+const areaFallbackCenters = {
+  海淀: { lat: 39.9623, lng: 116.3588 },
+  朝阳: { lat: 39.9219, lng: 116.4855 },
+  昌平: { lat: 40.1649, lng: 116.2885 },
+  房山: { lat: 39.7299, lng: 116.1673 },
+  通州: { lat: 39.9165, lng: 116.6624 },
+  大兴: { lat: 39.7288, lng: 116.3309 },
+  石景山: { lat: 39.9076, lng: 116.2529 },
+  城区: { lat: 39.9042, lng: 116.4074 },
+  通用区域: { lat: 39.9042, lng: 116.4074 }
+};
+
 function normalizeStartText(input) {
   return String(input || "")
     .trim()
@@ -139,6 +151,7 @@ function universityResult(input, match) {
   const primarySubway = subwayStations[0]?.replace(/站$/, "") || "";
   const station = primarySubway ? findStation(primarySubway) : null;
   const fallback = universityArea(campus.region, campus.district);
+  const fallbackCenter = areaFallbackCenters[campus.region] || areaFallbackCenters[fallback.area] || areaFallbackCenters["通用区域"];
 
   return {
     originalInput: input,
@@ -147,6 +160,9 @@ function universityResult(input, match) {
     transitZone: station?.transitZone || fallback.transitZone,
     matchedStation: station?.name || primarySubway || null,
     matchedStationInfo: station,
+    lat: Number.isFinite(campus.lat) ? campus.lat : fallbackCenter.lat,
+    lng: Number.isFinite(campus.lng) ? campus.lng : fallbackCenter.lng,
+    address: campus.address,
     lines: station?.lines || [],
     nearbySubwayStations: subwayStations,
     nearbyBusStops: campus.nearbyBusStops || [],

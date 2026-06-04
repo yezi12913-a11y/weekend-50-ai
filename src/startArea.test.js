@@ -60,6 +60,27 @@ test("resolves Beijing university names and campuses to nearby subway and bus st
   });
 });
 
+test("covers additional Beijing university names and exposes usable location fallback", () => {
+  const cases = [
+    ["外交学院", "外交学院"],
+    ["外交学院展览馆路校区", "外交学院"],
+    ["北外", "北京外国语大学"],
+    ["首师大", "首都师范大学"],
+    ["中传", "中国传媒大学"],
+    ["央财", "中央财经大学"],
+    ["北京电子科技学院", "北京电子科技学院"]
+  ];
+
+  cases.forEach(([input, universityName]) => {
+    const result = detectStartLocation(input);
+    assert.equal(result.confidence, "university", input);
+    assert.equal(result.universityName, universityName, input);
+    assert.ok(result.nearbySubwayStations.length > 0, input);
+    assert.equal(Number.isFinite(result.lat), true, input);
+    assert.equal(Number.isFinite(result.lng), true, input);
+  });
+});
+
 test("falls back to area keywords without blocking ordinary place text", () => {
   assert.equal(detectStartArea("学校东门"), "通用区域");
   assert.equal(detectStartLocation("学校东门").confidence, "unknown");

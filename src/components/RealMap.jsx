@@ -70,7 +70,7 @@ function MapPlaceholder({ route, form }) {
         {route?.steps?.map((step, index) => (
           <a
             key={`${step.place}-${index}`}
-            href={buildAmapNavigationUrl(step)}
+            href={buildAmapNavigationUrl(step, form)}
             target="_blank"
             rel="noreferrer"
             className="block rounded-2xl bg-slate-50 p-4 transition hover:bg-cream"
@@ -133,7 +133,7 @@ export default function RealMap({ route, form }) {
                 <p>${step.action}</p>
                 <p>预计消费：${step.cost}元</p>
                 <p>${step.tip || route.whyRecommended}</p>
-                <a href="${buildAmapNavigationUrl(step)}" target="_blank" rel="noreferrer">打开高德地图导航</a>
+                <a href="${buildAmapNavigationUrl(step, form)}" target="_blank" rel="noreferrer">打开高德地图导航</a>
               </div>
             `
           });
@@ -178,7 +178,7 @@ export default function RealMap({ route, form }) {
         </a>
       </div>
       <div ref={mapRef} className="h-[360px] w-full overflow-hidden rounded-2xl bg-slate-100 sm:h-[420px]" />
-      <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">点击地图 marker 可查看地点名称、预计消费和推荐理由。导航以高德地图实际路线为准。</p>
+      <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">出发地：{form?.start || startCenter.name}。点击地图 marker 可查看地点名称、预计消费和推荐理由，导航会从你填写的出发地开始。</p>
     </section>
   );
 }

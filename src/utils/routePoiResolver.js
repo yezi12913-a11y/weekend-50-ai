@@ -1,4 +1,5 @@
 import { amapGet, amapLocationToLngLat, hasAmapKey } from "./amapService.js";
+import { beijingFallbackPois } from "../data/beijingFallbackPois.js";
 
 const destinationCenters = {
   合生汇: { lat: 39.8936, lng: 116.4898 },
@@ -24,24 +25,43 @@ const destinationCenters = {
 };
 
 const expensivePoiWords = ["酒吧", "西餐", "牛排", "日料", "烧肉", "海鲜", "私房菜", "高端", "会所"];
-const diningNameWords = ["餐", "饭", "面", "粉", "饺", "馄饨", "米线", "小吃", "快餐", "麦当劳", "肯德基", "鸡柳", "鸡排", "汉堡", "火锅", "烤肉", "中餐", "食堂"];
-const drinkNameWords = ["便利店", "便利蜂", "罗森", "7-ELEVEn", "全家", "咖啡", "奶茶", "甜品", "饮品", "瑞幸", "库迪", "蜜雪冰城", "茶百道"];
+const foodNameWords = ["餐", "饭", "面", "粉", "饺", "馄饨", "米线", "小吃", "快餐", "麦当劳", "肯德基", "鸡柳", "鸡排", "汉堡", "火锅", "烤肉", "中餐", "食堂", "吉野家", "和府捞面", "南城香", "沙县", "兰州拉面", "麻辣烫", "熟食"];
+const drinkNameWords = ["超市", "便利店", "便利蜂", "罗森", "7-ELEVEN", "7-11", "全家", "咖啡", "奶茶", "茶", "甜品", "饮品", "瑞幸", "星巴克", "库迪", "喜茶", "奈雪", "蜜雪冰城", "茶百道", "霸王茶姬", "麦当劳", "肯德基"];
+const retailOnlyWords = ["GIANT", "优衣库", "ZARA", "NIKE", "APPLE", "APPLE STORE", "书店", "文创", "服装", "运动品牌", "数码", "家电", "电子", "杂货", "专卖店", "体育用品", "购物服务;服装", "购物服务;体育"];
 const playableNameWords = ["展", "美术馆", "博物馆", "艺术中心", "影院", "电影", "公园", "街区", "商场", "书店"];
 const closedPoiWords = ["暂停营业", "已关闭", "永久关闭", "停业", "歇业", "装修中", "暂停开放", "闭店"];
+const foodStepPattern = /吃饭|正餐|简餐|小吃|餐饮|午餐|晚餐|吃点好的|餐|吃|轻食|美食|饭/;
+const drinkStepPattern = /喝水|买水|饮料|奶茶|咖啡|休息补给|补给|饮品|甜品/;
 
 export function stepNeedsRealPoi(step) {
   const text = `${step.place || ""} ${step.action || ""}`;
   return /餐|吃|小吃|轻食|简餐|饮品|便利店|咖啡|奶茶|甜品|正餐|补给|舒适停留|体验升级/.test(text);
 }
 
+function textForPoi(poi) {
+  return `${poi.name || ""}${poi.type || ""}${poi.address || ""}`.toUpperCase();
+}
+
+function stepNeedsFood(step) {
+  return foodStepPattern.test(`${step.place || ""} ${step.action || ""} ${step.tip || ""}`);
+}
+
+function stepNeedsDrink(step) {
+  return drinkStepPattern.test(`${step.place || ""} ${step.action || ""} ${step.tip || ""}`);
+}
+
 export function buildPoiKeywordForStep(route, step) {
   const destination = route?.destination || "北京";
   const text = `${step.place || ""} ${step.action || ""}`;
   const budget = Number(route?.userBudget || 0);
-  if (/咖啡|奶茶|甜品|饮品|舒适停留/.test(text)) return `${destination} 咖啡 甜品 奶茶`;
-  if (/便利店|补给/.test(text)) return `${destination} 便利店 饮品`;
-  if (budget >= 150 && /正餐|餐|吃|小吃|轻食|简餐/.test(text)) return `${destination} 正餐 中餐 餐厅`;
-  if (/正餐|餐|吃|小吃|轻食|简餐/.test(text)) return `${destination} 平价简餐 小吃 快餐`;
+  const planType = route?.fallbackPlanType || route?.foodPoiPlanType || "";
+  if (stepNeedsDrink(step)) return `${destination} 咖啡 奶茶 饮品 便利店`;
+  if (stepNeedsFood(step)) {
+    if (planType === "cheap") return `${destination} 便利店 平价小吃 快餐`;
+    if (planType === "steady") return `${destination} 商场B1 美食区 连锁快餐 平价正餐`;
+    if (planType === "vibe" || budget >= 150) return `${destination} 正餐 咖啡 甜品 餐厅`;
+    return `${destination} 平价简餐 小吃 快餐`;
+  }
   if (/体验升级|电影|展/.test(text)) return `${destination} 咖啡 甜品 展览 电影`;
   return `${destination} ${step.place || ""}`;
 }
@@ -67,16 +87,36 @@ function normalizePoi(poi, fallbackCost) {
   };
 }
 
+export function isRetailOnlyPoi(poi) {
+  const text = textForPoi(poi);
+  return retailOnlyWords.some((word) => text.includes(word));
+}
+
+export function isFoodPoi(poi) {
+  const text = textForPoi(poi);
+  if (isRetailOnlyPoi(poi) || /景点|风景名胜|公园|展馆|美术馆|博物馆|公司|政府|汽车|房产/.test(text)) return false;
+  if (/餐饮服务/.test(text)) return true;
+  if (/购物服务;便利店|便利店|超市/.test(text) && /熟食|便当|饭团|关东煮|餐|饭|小吃/.test(text)) return true;
+  return foodNameWords.some((word) => text.includes(word.toUpperCase()));
+}
+
 export function isDiningPoi(poi) {
-  const text = `${poi.name || ""}${poi.type || ""}`;
-  return !/家电|电子|数码|购物服务|生活服务|汽车|房产|公司|政府/.test(text)
-    && (/餐饮服务/.test(text) || diningNameWords.some((word) => text.includes(word)));
+  return isFoodPoi(poi);
 }
 
 export function isDrinkPoi(poi) {
-  const text = `${poi.name || ""}${poi.type || ""}`;
-  return !/家电|电子|数码|汽车|房产|公司|政府/.test(text)
-    && (/餐饮服务|购物服务;便利店/.test(text) || drinkNameWords.some((word) => text.includes(word)));
+  const text = textForPoi(poi);
+  if (isRetailOnlyPoi(poi) || /景点|风景名胜|公园|展馆|美术馆|博物馆|公司|政府|汽车|房产/.test(text)) return false;
+  return /餐饮服务|购物服务;便利店|购物服务;超级市场|超市|便利店/.test(text)
+    || drinkNameWords.some((word) => text.includes(word.toUpperCase()));
+}
+
+export function filterFoodPois(pois) {
+  return (pois || []).filter((poi) => poi?.name && isOpenPoi(poi) && isFoodPoi(poi));
+}
+
+export function filterDrinkPois(pois) {
+  return (pois || []).filter((poi) => poi?.name && isOpenPoi(poi) && isDrinkPoi(poi));
 }
 
 export function isOpenPoi(poi) {
@@ -106,13 +146,81 @@ function keywordRequiresPlayable(keyword) {
 function isUsablePoi(poi, keyword) {
   const text = `${poi.name || ""}${poi.type || ""}`;
   if (!poi.name || !poi.location || !isOpenPoi(poi) || expensivePoiWords.some((word) => text.includes(word))) return false;
-  if (keywordRequiresDining(keyword)) return isDiningPoi(poi);
+  if (keywordRequiresDining(keyword)) return isFoodPoi(poi);
   if (keywordRequiresDrink(keyword)) return isDrinkPoi(poi);
   if (keywordRequiresPlayable(keyword)) return isPlayablePoi(poi);
   return true;
 }
 
-async function searchPoi(keyword, fallbackCost) {
+export function getFoodTierByBudget(budget, planType) {
+  if (planType === "cheap") return "low";
+  if (planType === "steady") return "mid";
+  if (planType === "vibe") return "high";
+  if (budget <= 60) return "low";
+  if (budget <= 120) return "mid";
+  return "high";
+}
+
+function foodTierScore(poi, tier) {
+  const text = textForPoi(poi);
+  const cost = Number(poi.estimatedCost || poi.cost || 0);
+  if (tier === "low") {
+    if (/便利店|7-11|7-ELEVEN|便利蜂|罗森|全家|小吃|快餐|麦当劳|肯德基|沙县|兰州|麻辣烫/.test(text)) return 0;
+    return cost <= 25 ? 1 : 4;
+  }
+  if (tier === "mid") {
+    if (/B1|美食区|连锁|快餐|麦当劳|肯德基|吉野家|和府|南城香|平价正餐/.test(text)) return 0;
+    return cost >= 24 && cost <= 55 ? 1 : 3;
+  }
+  if (/正餐|餐厅|咖啡|甜品|喜茶|奈雪|星巴克|瑞幸|中餐/.test(text)) return 0;
+  return cost >= 45 ? 1 : 3;
+}
+
+export function avoidDuplicateFoodPois(selectedPois, candidatePois) {
+  const selected = selectedPois instanceof Set ? selectedPois : new Set(selectedPois || []);
+  return (candidatePois || []).filter((poi) => !selected.has(poi.name));
+}
+
+export function selectFoodPoiByPlanType(pois, planType, budget, selectedPois = new Set()) {
+  const tier = getFoodTierByBudget(budget, planType);
+  const candidates = avoidDuplicateFoodPois(selectedPois, filterFoodPois(pois));
+  const source = candidates.length ? candidates : filterFoodPois(pois);
+  return [...source].sort((a, b) => foodTierScore(a, tier) - foodTierScore(b, tier))[0];
+}
+
+function selectDrinkPoi(pois, selectedPois = new Set()) {
+  const selected = selectedPois instanceof Set ? selectedPois : new Set(selectedPois || []);
+  return filterDrinkPois(pois).find((poi) => !selected.has(poi.name)) || filterDrinkPois(pois)[0];
+}
+
+function fallbackGroupForDestination(destination) {
+  const text = String(destination || "");
+  return beijingFallbackPois.find((group) => group.name === text || group.aliases?.some((alias) => text.includes(alias) || alias.includes(text)))
+    || beijingFallbackPois[0];
+}
+
+function fallbackPoiForStep(route, step, selectedPois) {
+  const group = fallbackGroupForDestination(route?.destination);
+  const tier = getFoodTierByBudget(Number(route?.userBudget || 50), route?.fallbackPlanType || route?.foodPoiPlanType);
+  const foodFallbacks = [
+    ...(group.nearbyBudgetFoodPois || []),
+    { name: `7-11熟食区（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 14, source: "fallback_food" },
+    { name: `麦当劳（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 24, source: "fallback_food" },
+    { name: `南城香（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 38, source: "fallback_food" },
+    { name: `平价正餐（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 58, source: "fallback_food" }
+  ];
+  const drinkFallbacks = [
+    ...(group.nearbyConveniencePois || []),
+    { name: `瑞幸咖啡（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 18, source: "fallback_drink" },
+    { name: `蜜雪冰城（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 12, source: "fallback_drink" }
+  ];
+
+  if (stepNeedsDrink(step) && !stepNeedsFood(step)) return selectDrinkPoi(drinkFallbacks, selectedPois);
+  if (tier === "high") return selectFoodPoiByPlanType([...foodFallbacks, ...drinkFallbacks], "vibe", route?.userBudget, selectedPois);
+  return selectFoodPoiByPlanType(foodFallbacks, route?.fallbackPlanType || route?.foodPoiPlanType, route?.userBudget, selectedPois);
+}
+
+async function searchPoi(keyword, fallbackCost, route, step) {
   const data = await amapGet("/place/text", {
     keywords: keyword,
     city: "北京",
@@ -120,10 +228,18 @@ async function searchPoi(keyword, fallbackCost) {
     page: "1"
   });
   const pois = Array.isArray(data?.pois) ? data.pois : [];
-  return pois
-    .filter((poi) => isUsablePoi(poi, keyword))
-    .map((poi) => normalizePoi(poi, fallbackCost))
-    .find((poi) => Number.isFinite(poi.lat) && Number.isFinite(poi.lng));
+  const selected = new Set(route?.usedFoodPoiNames || []);
+  const usable = pois.filter((poi) => isUsablePoi(poi, keyword));
+  const selectedPoi = keywordRequiresDrink(keyword) && !keywordRequiresDining(keyword)
+    ? selectDrinkPoi(usable, selected)
+    : keywordRequiresDining(keyword)
+      ? selectFoodPoiByPlanType(usable, route?.fallbackPlanType || route?.foodPoiPlanType, route?.userBudget, selected)
+      : usable[0];
+  const fallbackPoi = selectedPoi || fallbackPoiForStep(route, step, selected);
+  if (!fallbackPoi) return null;
+
+  const normalized = fallbackPoi.location ? normalizePoi(fallbackPoi, fallbackCost) : { ...fallbackPoi, poiId: fallbackPoi.poiId || fallbackPoi.name };
+  return Number.isFinite(normalized.lat) && Number.isFinite(normalized.lng) ? normalized : null;
 }
 
 export async function resolveRoutePois(route) {
@@ -133,7 +249,7 @@ export async function resolveRoutePois(route) {
   const steps = await Promise.all((route.steps || []).map(async (step) => {
     if (!stepNeedsRealPoi(step) || step.source === "amap_poi") return step;
     const keyword = buildPoiKeywordForStep(route, step);
-    const poi = await searchPoi(keyword, step.cost || route.foodCost || 20);
+    const poi = await searchPoi(keyword, step.cost || route.foodCost || 20, route, step);
     if (!poi) return { ...step, poiStatus: "高德暂未返回稳定店铺，请以地图搜索为准。" };
 
     return {

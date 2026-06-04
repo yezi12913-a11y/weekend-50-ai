@@ -258,3 +258,23 @@ test("higher food budget rises with a 200 yuan eating request", async () => {
     });
   });
 });
+
+test("three budget plans use distinct food strategies for the same destination", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    destination: "合生汇",
+    customBudget: "200",
+    activities: ["逛街", "吃东西"],
+    companion: "多人",
+    moods: ["想吃点好的", "想和朋友热闹一点"]
+  }));
+  const foodSteps = routes.map((route) => route.steps.find((step) => /餐|吃|小吃|正餐|简餐|咖啡|甜品|饮品/.test(`${step.place}${step.action}`)));
+  const foodTexts = foodSteps.map((step) => `${step.place}${step.action}${step.tip}`);
+
+  assert.equal(routes.length, 3);
+  assert.ok(foodSteps.every(Boolean));
+  assert.equal(new Set(foodTexts).size, 3);
+  assert.match(foodTexts[0], /便利店|平价|小吃|快餐|简餐|保守/);
+  assert.match(foodTexts[1], /B1|美食区|连锁|平价正餐|平衡|稳妥/);
+  assert.match(foodTexts[2], /正餐|咖啡|甜品|体验|升级|更舒服/);
+});

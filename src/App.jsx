@@ -6,7 +6,8 @@ import { keepUnspecifiedDestinationLast } from "./destinationOptions.js";
 import { detectStartArea, detectStartInfo } from "./startArea.js";
 import { formatTimePreference, isRouteTimeFit, timePreferenceLabelForAi } from "./timePreference.js";
 import { estimateTransitCost } from "./transitEstimate.js";
-import { buildAmapNavigationUrl } from "./utils/mapLinks.js";
+import { buildAmapNavigationUrl, buildCopyableRouteText } from "./utils/mapLinks.js";
+import { copyTextToClipboard } from "./utils/clipboard.js";
 import { resolveRoutePois } from "./utils/routePoiResolver.js";
 
 const activityOptions = [
@@ -1197,9 +1198,33 @@ function cloneWithAdjustments(route, form, variant, index) {
         tip: budgetPlan.budgetStatus === "可能略超" ? "如果临场价格偏高，可以把这个升级项取消。" : "这是让高预算方案不再停留在低配路线的关键。"
       }
     : null;
+  const foodStrategy = {
+    cheap: {
+      place: "平价小吃/快餐",
+      action: "选择平价小吃、快餐或简餐，餐饮更保守，把消费点控制在一个以内",
+      tip: "省钱版优先控制餐饮预算，不把钱花在正餐和连续饮品上。"
+    },
+    steady: {
+      place: "商场 B1/美食区",
+      action: "选择商场 B1、美食区、连锁快餐或平价正餐，让餐饮和活动平衡",
+      tip: "稳妥版保留更稳定的餐饮选择，同时避免明显超预算。"
+    },
+    vibe: {
+      place: "正餐/咖啡甜品升级",
+      action: "选择更舒服的正餐、咖啡、甜品或轻体验，把预算升级花在休息体验上",
+      tip: "体验升级版允许餐饮或休息体验更好，但仍保留可取消的弹性。"
+    }
+  }[variant];
+
   const dynamicSteps = route.steps.map((step) => {
     if (step.cost === route.foodCost || /餐|吃|小吃|轻食|简餐|饮品/.test(step.action + step.place)) {
-      return { ...step, cost: budgetPlan.foodCost, tip: budgetPlan.foodCost > route.foodCost ? "预算更充足时，可以从简餐升级到更舒服的餐饮选择。" : step.tip };
+      return {
+        ...step,
+        place: foodStrategy.place,
+        action: foodStrategy.action,
+        cost: budgetPlan.foodCost,
+        tip: foodStrategy.tip
+      };
     }
     if (/展|电影|体验/.test(step.action + step.place)) {
       return { ...step, cost: Math.max(step.cost, budgetPlan.activityCost), tip: budgetPlan.activityCost > step.cost ? "这次预算允许加入付费内容，但先看现场价格。" : step.tip };
@@ -1230,6 +1255,8 @@ function cloneWithAdjustments(route, form, variant, index) {
     moodFitReason: moodFitReason(matchingMoods),
     moodTradeoffNote: tradeoffNote,
     budgetMoodNote: budgetPlan.budgetExplanation,
+    foodPoiPlanType: variant,
+    usedFoodPoiNames: route.usedFoodPoiNames || [],
     steps: dynamicSteps,
     aiNote: `${lowBudgetNote}${budgetWarning ? " 这个方案可能略超预算，原因是加入了更完整的餐饮或体验升级；可以删掉升级项回到预算内。" : ""} ${budgetPlan.budgetExplanation}${tradeoffNote ? ` ${tradeoffNote}` : ""}${form.companion === "独自" ? " 你是独自出行，所以我也优先考虑了可随时结束、社交压力低的路线。" : form.companion === "双人" ? " 双人出行更适合把钱花在聊天停留点，而不是堆消费项目。" : " 多人出行时集合和选择弹性更重要，所以我避开了过窄、过依赖预约的路线。"}`
   };
@@ -1389,7 +1416,13 @@ function generateRecommendations(form) {
     picked.push(fallback);
   }
 
-  return picked.slice(0, 3).map((route, index) => cloneWithAdjustments(route, form, ["cheap", "steady", "vibe"][index], index));
+  const usedFoodPoiNames = new Set();
+  return picked.slice(0, 3).map((route, index) => {
+    const cloned = cloneWithAdjustments({ ...route, usedFoodPoiNames: [...usedFoodPoiNames] }, form, ["cheap", "steady", "vibe"][index], index);
+    const foodStep = cloned.steps.find((step) => /餐|吃|小吃|正餐|简餐|咖啡|甜品|饮品|美食区|快餐/.test(`${step.place}${step.action}`));
+    if (foodStep?.place) usedFoodPoiNames.add(foodStep.place);
+    return cloned;
+  });
 }
 
 function trafficDecisionNote(form, firstRoute) {
@@ -1476,6 +1509,7 @@ function HomePage({ onStart }) {
           <div className="inline-flex rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-leaf shadow-sm">你的个性化推荐助手</div>
           <div className="space-y-4">
             <h1 className="text-6xl font-black leading-none tracking-normal text-ink sm:text-7xl lg:text-8xl">周末50元</h1>
+            <p className="max-w-2xl text-3xl font-black leading-tight text-ink sm:text-4xl">想出门但不知道去哪？让我们为你安排。</p>
             <p className="text-2xl font-bold text-leaf sm:text-3xl">北京大学生低预算轻出行 AI 助手</p>
             <p className="max-w-2xl text-xl leading-8 text-slate-700">输入预算、心情和出发地，30秒生成一条真的能去的周末路线。</p>
           </div>
@@ -1649,7 +1683,7 @@ function ResultPage({ form, results, selectedRoute, setSelectedRoute, onBack, on
       <div className="mt-6 grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-5">
           {results.map((route) => (
-            <RouteCard key={route.routeId} route={route} selected={selectedRoute?.routeId === route.routeId} onSelect={() => setSelectedRoute(route)} />
+            <RouteCard key={route.routeId} route={route} form={form} selected={selectedRoute?.routeId === route.routeId} onSelect={() => setSelectedRoute(route)} />
           ))}
         </div>
         <aside className="space-y-5 lg:sticky lg:top-5 lg:self-start">
@@ -1665,8 +1699,9 @@ function ResultPage({ form, results, selectedRoute, setSelectedRoute, onBack, on
   );
 }
 
-function RouteCard({ route, selected, onSelect }) {
+function RouteCard({ route, form, selected, onSelect }) {
   const [displayRoute, setDisplayRoute] = useState(route);
+  const [copyStatus, setCopyStatus] = useState("");
 
   useEffect(() => {
     let disposed = false;
@@ -1680,6 +1715,17 @@ function RouteCard({ route, selected, onSelect }) {
   }, [route]);
 
   const shownRoute = displayRoute || route;
+
+  async function copyRoute(event) {
+    event.stopPropagation();
+    const text = buildCopyableRouteText(shownRoute, form);
+    const copied = await copyTextToClipboard(text);
+    if (copied) {
+      setCopyStatus("已复制，可发送给朋友");
+    } else {
+      setCopyStatus("复制失败，请手动选择文本");
+    }
+  }
 
   return (
     <article className={`rounded-[28px] border bg-white/90 p-6 shadow-soft transition ${selected ? "border-leaf ring-4 ring-mint" : "border-white/70"}`}>
@@ -1714,6 +1760,16 @@ function RouteCard({ route, selected, onSelect }) {
         </div>
         <p className="mt-3 rounded-2xl bg-skysoft/70 p-4 text-sm font-semibold leading-7 text-slate-700">{route.aiNote}</p>
       </button>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <button
+          type="button"
+          onClick={copyRoute}
+          className="rounded-full bg-leaf px-5 py-3 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-ink"
+        >
+          复制方案
+        </button>
+        {copyStatus && <p className="text-sm font-black text-leaf">{copyStatus}</p>}
+      </div>
       <TransitEstimateBlock estimate={route.transitEstimate} />
       <div className="mt-5 grid gap-3">
         {shownRoute.steps.map((step, index) => (
@@ -1731,7 +1787,7 @@ function RouteCard({ route, selected, onSelect }) {
             </div>
             <p className="font-black text-leaf">{step.cost}元</p>
             <a
-              href={buildAmapNavigationUrl(step)}
+              href={buildAmapNavigationUrl(step, form)}
               target="_blank"
               rel="noreferrer"
               className="font-black text-leaf underline decoration-2 underline-offset-4"
