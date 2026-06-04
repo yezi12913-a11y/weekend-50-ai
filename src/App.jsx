@@ -70,7 +70,7 @@ const nonspecificDestinations = new Set([
 
 const destinationGroups = {
   合生汇: ["合生汇", "合生汇 B1", "九龙山", "大郊亭", "商场美食区"],
-  三里屯: ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆", "亮马河", "蓝色港湾"],
+  三里屯: ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆"],
   朝阳大悦城: ["朝阳大悦城", "青年路", "朝阳", "商场美食区"],
   西单大悦城: ["西单大悦城", "西单", "西单商圈"],
   荟聚: ["荟聚", "西红门"],
@@ -756,8 +756,7 @@ function getDestinationGroupTerms(destination) {
   const normalized = normalizeDestination(destination);
   if (!normalized) return [];
   const directGroup = destinationGroups[normalized] || [];
-  const containingGroup = Object.values(destinationGroups).find((group) => group.includes(normalized)) || [];
-  return [...new Set([normalized, ...directGroup, ...containingGroup])];
+  return [...new Set([normalized, ...directGroup])];
 }
 
 function textIncludesAnyTerm(text, terms) {
@@ -785,6 +784,15 @@ function getRouteDestinationText(route) {
   ].filter(Boolean).join(" ");
 }
 
+function getRouteCoreDestinationText(route) {
+  return [
+    route.destination,
+    route.routeName,
+    route.category,
+    ...(route.steps || []).flatMap((step) => [step.place, step.action])
+  ].filter(Boolean).join(" ");
+}
+
 function isRouteRelatedToDestination(route, selectedDestination) {
   const selected = normalizeDestination(selectedDestination);
   const routeDestination = normalizeDestination(route?.destination);
@@ -793,17 +801,16 @@ function isRouteRelatedToDestination(route, selectedDestination) {
   if (routeDestination.includes(selected) || selected.includes(routeDestination)) return true;
 
   const selectedTerms = getDestinationGroupTerms(selected);
-  const routeTerms = getDestinationGroupTerms(routeDestination);
   const explicitRouteTerms = [
     ...(route.relatedDestinations || []),
-    ...(route.nearbyDestinations || []),
-    ...(route.tags || [])
+    ...(route.nearbyDestinations || [])
   ];
-  const routeText = getRouteDestinationText(route);
+  const routeText = getRouteCoreDestinationText(route);
 
+  if (selectedTerms.includes(routeDestination)) return true;
   if (textIncludesAnyTerm(routeText, [selected])) return true;
   if (explicitRouteTerms.some((term) => selectedTerms.includes(term) || selected.includes(term) || term.includes(selected))) return true;
-  return selectedTerms.includes(routeDestination) || routeTerms.includes(selected);
+  return false;
 }
 
 function hasIndoorNeed(form, moods = getEffectiveMoods(form)) {
@@ -1397,6 +1404,22 @@ function ensureThreeDestinationRoutes(candidateRoutes, form) {
   return existing;
 }
 
+function anchorRouteCopyToSelectedDestination(route, form) {
+  if (!isSpecificDestination(form.destination) || !isRouteRelatedToDestination(route, form.destination)) return route;
+  const selected = normalizeDestination(form.destination);
+  const terms = getDestinationGroupTerms(selected);
+  const nearby = terms.filter((term) => term !== selected).slice(0, 3);
+  const nearbyText = nearby.length ? nearby.join("、") : "周边室内公共空间";
+
+  return {
+    ...route,
+    relatedDestinations: [...new Set([selected, ...(route.relatedDestinations || []).filter((term) => terms.includes(term))])],
+    nearbyDestinations: [...new Set([...(route.nearbyDestinations || []).filter((term) => terms.includes(term)), ...nearby])],
+    badWeatherAlternative: `天气不好时仍以${selected}为核心，优先选择${selected}或${nearbyText}附近的室内公共空间。`,
+    whyRecommended: `因为你明确选择了${selected}，所以这条方案只围绕${selected}及附近可步行/短途到达区域安排。`
+  };
+}
+
 function generateRecommendations(form) {
   const destinationCandidates = isSpecificDestination(form.destination)
     ? ensureThreeDestinationRoutes(routesData.filter((route) => isRouteRelatedToDestination(route, form.destination)), form)
@@ -1418,7 +1441,8 @@ function generateRecommendations(form) {
 
   const usedFoodPoiNames = new Set();
   return picked.slice(0, 3).map((route, index) => {
-    const cloned = cloneWithAdjustments({ ...route, usedFoodPoiNames: [...usedFoodPoiNames] }, form, ["cheap", "steady", "vibe"][index], index);
+    const anchoredRoute = anchorRouteCopyToSelectedDestination(route, form);
+    const cloned = cloneWithAdjustments({ ...anchoredRoute, usedFoodPoiNames: [...usedFoodPoiNames] }, form, ["cheap", "steady", "vibe"][index], index);
     const foodStep = cloned.steps.find((step) => /餐|吃|小吃|正餐|简餐|咖啡|甜品|饮品|美食区|快餐/.test(`${step.place}${step.action}`));
     if (foodStep?.place) usedFoodPoiNames.add(foodStep.place);
     return cloned;

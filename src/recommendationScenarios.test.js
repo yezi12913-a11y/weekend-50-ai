@@ -56,6 +56,14 @@ function isPureOutdoorRoute(route) {
     && !/室内|商场|书店|图书馆|咖啡|展馆|美术馆|电影院|公共区|雨天不建议长时间户外/.test(text);
 }
 
+function assertRoutesStayInDestinationGroup(routes, groupTerms, forbiddenTerms) {
+  routes.forEach((route) => {
+    const text = routeText(route);
+    assert.ok(groupTerms.some((term) => text.includes(term)), `${route.routeName} should stay in ${groupTerms.join("/")}`);
+    assert.doesNotMatch(text, new RegExp(forbiddenTerms.join("|")), `${route.routeName} should not mention unrelated destinations`);
+  });
+}
+
 test("budget tiers classify the requested ranges", async () => {
   const { getBudgetTier } = await loadAppModule();
   assert.equal(getBudgetTier(30).label, "极低预算");
@@ -178,7 +186,7 @@ test("300 yuan full-day group scenario creates a clear upgrade plan", async () =
 
 test("specific destinations keep all three plans within the selected destination group", async () => {
   const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
-  const destinations = ["合生汇", "三里屯", "798"];
+  const destinations = ["合生汇", "三里屯", "798", "蓝色港湾"];
 
   destinations.forEach((destination) => {
     const routes = generateRecommendations(makeForm({ destination }));
@@ -191,6 +199,68 @@ test("specific destinations keep all three plans within the selected destination
       );
     });
   });
+});
+
+test("Blue Harbor explicit destination only returns Blue Harbor group plans", async () => {
+  const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    destination: "蓝色港湾",
+    customBudget: "200",
+    activities: ["拍照打卡", "低预算约会", "吃东西"],
+    moods: ["想有一点仪式感", "想吃点好的"]
+  }));
+
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => assert.ok(isRouteRelatedToDestination(route, "蓝色港湾"), route.routeName));
+  assertRoutesStayInDestinationGroup(routes, ["蓝色港湾", "亮马河", "枣营", "亮马桥"], ["三里屯", "奥森", "牛街", "798", "首钢园", "西单", "合生汇"]);
+});
+
+test("Sanlitun explicit destination only returns Sanlitun group plans", async () => {
+  const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    destination: "三里屯",
+    customBudget: "120",
+    activities: ["逛街", "拍照打卡", "吃东西"],
+    moods: ["想聊天", "想有一点仪式感"]
+  }));
+
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => assert.ok(isRouteRelatedToDestination(route, "三里屯"), route.routeName));
+  assertRoutesStayInDestinationGroup(routes, ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆"], ["奥森", "牛街", "798", "首钢园", "西单", "合生汇"]);
+});
+
+test("798 explicit destination only returns 798 group plans", async () => {
+  const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    destination: "798",
+    customBudget: "150",
+    activities: ["看展", "拍照打卡"],
+    moods: ["想拍照", "想有一点仪式感"]
+  }));
+
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => assert.ok(isRouteRelatedToDestination(route, "798"), route.routeName));
+  assertRoutesStayInDestinationGroup(routes, ["798", "酒仙桥", "将台", "望京南", "高家园", "UCCA"], ["三里屯", "奥森", "牛街", "首钢园", "西单", "合生汇", "蓝色港湾"]);
+});
+
+test("high budget explicit Blue Harbor plans do not jump to unrelated destinations", async () => {
+  const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    start: "五道口",
+    customBudget: "200",
+    activities: ["拍照打卡", "低预算约会", "吃东西"],
+    destination: "蓝色港湾",
+    weather: "晴天",
+    companion: "双人",
+    moods: ["想有一点仪式感", "想吃点好的"]
+  }));
+
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => {
+    assert.ok(isRouteRelatedToDestination(route, "蓝色港湾"), routeText(route));
+    assert.doesNotMatch(routeText(route), /798|首钢园|牛街|护国寺|合生汇|西单|朝阳大悦城|荟聚/);
+  });
+  assert.ok(routes[2].upgradeCost > 0);
 });
 
 test("unspecified destination can still recommend different destinations", async () => {

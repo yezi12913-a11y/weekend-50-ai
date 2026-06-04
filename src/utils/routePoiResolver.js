@@ -30,12 +30,16 @@ const drinkNameWords = ["超市", "便利店", "便利蜂", "罗森", "7-ELEVEN"
 const retailOnlyWords = ["GIANT", "优衣库", "ZARA", "NIKE", "APPLE", "APPLE STORE", "书店", "文创", "服装", "运动品牌", "数码", "家电", "电子", "杂货", "专卖店", "体育用品", "购物服务;服装", "购物服务;体育"];
 const playableNameWords = ["展", "美术馆", "博物馆", "艺术中心", "影院", "电影", "公园", "街区", "商场", "书店"];
 const closedPoiWords = ["暂停营业", "已关闭", "永久关闭", "停业", "歇业", "装修中", "暂停开放", "闭店"];
+const privatePlaceWords = ["小学", "中学", "幼儿园", "培训学校", "家属院", "小区", "社区", "居委", "村委", "村庄", "村民", "私人住宅", "住宅区", "宿舍", "公寓", "别墅", "商务住宅"];
+const publicRestWords = ["公园", "广场", "湖", "河", "滨水", "步道", "街区", "胡同", "商业街", "商场", "购物中心", "公共空间", "公共休息", "文化", "文创", "艺术区", "艺术中心", "博物馆", "美术馆", "图书馆", "书店", "咖啡"];
 const foodStepPattern = /吃饭|正餐|简餐|小吃|餐饮|午餐|晚餐|吃点好的|餐|吃|轻食|美食|饭/;
 const drinkStepPattern = /喝水|买水|饮料|奶茶|咖啡|休息补给|补给|饮品|甜品/;
+const publicRestStepPattern = /散步|休息|打卡|拍照|放空|坐一会|坐着|停留|公共空间|公共区|湖边|河边|街区|广场|公园|橱窗|夜景|漫游|慢走/;
 
 export function stepNeedsRealPoi(step) {
   const text = `${step.place || ""} ${step.action || ""}`;
-  return /餐|吃|小吃|轻食|简餐|饮品|便利店|咖啡|奶茶|甜品|正餐|补给|舒适停留|体验升级/.test(text);
+  return /餐|吃|小吃|轻食|简餐|饮品|便利店|咖啡|奶茶|甜品|正餐|补给|舒适停留|体验升级/.test(text)
+    || publicRestStepPattern.test(text);
 }
 
 function textForPoi(poi) {
@@ -50,18 +54,26 @@ function stepNeedsDrink(step) {
   return drinkStepPattern.test(`${step.place || ""} ${step.action || ""} ${step.tip || ""}`);
 }
 
+function stepNeedsPublicRest(step) {
+  return publicRestStepPattern.test(`${step.place || ""} ${step.action || ""} ${step.tip || ""}`);
+}
+
 export function buildPoiKeywordForStep(route, step) {
   const destination = route?.destination || "北京";
   const text = `${step.place || ""} ${step.action || ""}`;
   const budget = Number(route?.userBudget || 0);
   const planType = route?.fallbackPlanType || route?.foodPoiPlanType || "";
-  if (stepNeedsDrink(step)) return `${destination} 咖啡 奶茶 饮品 便利店`;
+  if (stepNeedsDrink(step) && !stepNeedsFood(step)) {
+    if (planType === "vibe" || budget >= 150) return `${destination} 咖啡 甜品 奶茶 饮品`;
+    return `${destination} 咖啡 奶茶 饮品 便利店`;
+  }
   if (stepNeedsFood(step)) {
     if (planType === "cheap") return `${destination} 便利店 平价小吃 快餐`;
     if (planType === "steady") return `${destination} 商场B1 美食区 连锁快餐 平价正餐`;
     if (planType === "vibe" || budget >= 150) return `${destination} 正餐 咖啡 甜品 餐厅`;
     return `${destination} 平价简餐 小吃 快餐`;
   }
+  if (stepNeedsPublicRest(step)) return `${destination} 公园 广场 街区 公共空间 文化 文创 商场 咖啡`;
   if (/体验升级|电影|展/.test(text)) return `${destination} 咖啡 甜品 展览 电影`;
   return `${destination} ${step.place || ""}`;
 }
@@ -92,6 +104,12 @@ export function isRetailOnlyPoi(poi) {
   return retailOnlyWords.some((word) => text.includes(word));
 }
 
+export function isForbiddenPrivatePlacePoi(poi) {
+  const text = `${poi.name || ""}${poi.type || ""}${poi.address || ""}`;
+  return privatePlaceWords.some((word) => text.includes(word))
+    || /地名地址信息;普通地名;村庄级地名|商务住宅;住宅|科教文化服务;学校|政府机构及社会团体.*社区/.test(text);
+}
+
 export function isFoodPoi(poi) {
   const text = textForPoi(poi);
   if (isRetailOnlyPoi(poi) || /景点|风景名胜|公园|展馆|美术馆|博物馆|公司|政府|汽车|房产/.test(text)) return false;
@@ -119,6 +137,18 @@ export function filterDrinkPois(pois) {
   return (pois || []).filter((poi) => poi?.name && isOpenPoi(poi) && isDrinkPoi(poi));
 }
 
+export function isPublicRestPoi(poi) {
+  const text = `${poi.name || ""}${poi.type || ""}${poi.address || ""}`;
+  if (!poi?.name || isForbiddenPrivatePlacePoi(poi) || !isOpenPoi(poi)) return false;
+  if (/公司|政府|汽车|房产|维修|批发|门诊|医院|银行/.test(text)) return false;
+  if (/风景名胜|体育休闲服务|购物服务;商场|购物服务;购物中心|餐饮服务;咖啡厅|科教文化服务;(图书馆|博物馆|美术馆|文化宫|展览馆|艺术团体)|道路附属设施/.test(text)) return true;
+  return publicRestWords.some((word) => text.includes(word));
+}
+
+export function filterPublicRestPois(pois) {
+  return (pois || []).filter((poi) => poi?.name && isPublicRestPoi(poi));
+}
+
 export function isOpenPoi(poi) {
   const text = `${poi.name || ""}${poi.type || ""}${poi.address || ""}${poi.biz_ext?.open_time || ""}`;
   return !closedPoiWords.some((word) => text.includes(word));
@@ -127,6 +157,7 @@ export function isOpenPoi(poi) {
 export function isPlayablePoi(poi) {
   const text = `${poi.name || ""}${poi.type || ""}`;
   return isOpenPoi(poi)
+    && !isForbiddenPrivatePlacePoi(poi)
     && !/家电|电子|数码|汽车|房产|公司|政府|维修|批发/.test(text)
     && (/科教文化服务|风景名胜|体育休闲服务|购物服务;商场|电影院/.test(text) || playableNameWords.some((word) => text.includes(word)));
 }
@@ -143,12 +174,17 @@ function keywordRequiresPlayable(keyword) {
   return /展览|电影|影院|美术馆|博物馆|游玩/.test(keyword);
 }
 
+function keywordRequiresPublicRest(keyword) {
+  return /公园|广场|街区|公共空间|文化|文创|商场|咖啡/.test(keyword);
+}
+
 function isUsablePoi(poi, keyword) {
   const text = `${poi.name || ""}${poi.type || ""}`;
   if (!poi.name || !poi.location || !isOpenPoi(poi) || expensivePoiWords.some((word) => text.includes(word))) return false;
   if (keywordRequiresDining(keyword)) return isFoodPoi(poi);
   if (keywordRequiresDrink(keyword)) return isDrinkPoi(poi);
   if (keywordRequiresPlayable(keyword)) return isPlayablePoi(poi);
+  if (keywordRequiresPublicRest(keyword)) return isPublicRestPoi(poi);
   return true;
 }
 
@@ -172,7 +208,8 @@ function foodTierScore(poi, tier) {
     if (/B1|美食区|连锁|快餐|麦当劳|肯德基|吉野家|和府|南城香|平价正餐/.test(text)) return 0;
     return cost >= 24 && cost <= 55 ? 1 : 3;
   }
-  if (/正餐|餐厅|咖啡|甜品|喜茶|奈雪|星巴克|瑞幸|中餐/.test(text)) return 0;
+  if (/餐饮服务;中餐|餐饮服务;餐厅|正餐|餐厅|中餐/.test(text)) return 0;
+  if (/咖啡|甜品|喜茶|奈雪|星巴克|瑞幸|奶茶|饮品/.test(text)) return 1;
   return cost >= 45 ? 1 : 3;
 }
 
@@ -191,6 +228,12 @@ export function selectFoodPoiByPlanType(pois, planType, budget, selectedPois = n
 function selectDrinkPoi(pois, selectedPois = new Set()) {
   const selected = selectedPois instanceof Set ? selectedPois : new Set(selectedPois || []);
   return filterDrinkPois(pois).find((poi) => !selected.has(poi.name)) || filterDrinkPois(pois)[0];
+}
+
+function selectPublicRestPoi(pois, selectedPois = new Set()) {
+  const selected = selectedPois instanceof Set ? selectedPois : new Set(selectedPois || []);
+  const publicPois = filterPublicRestPois(pois);
+  return publicPois.find((poi) => !selected.has(poi.name)) || publicPois[0];
 }
 
 function fallbackGroupForDestination(destination) {
@@ -214,7 +257,12 @@ function fallbackPoiForStep(route, step, selectedPois) {
     { name: `瑞幸咖啡（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 18, source: "fallback_drink" },
     { name: `蜜雪冰城（${route?.destination || group.name}附近）`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 12, source: "fallback_drink" }
   ];
+  const restFallbacks = [
+    ...(group.nearbyComfortPois || []),
+    { name: `${route?.destination || group.name}周边公共空间`, address: group.address, lat: group.lat, lng: group.lng, estimatedCost: 0, source: "fallback_public_rest" }
+  ];
 
+  if (stepNeedsPublicRest(step) && !stepNeedsFood(step) && !stepNeedsDrink(step)) return selectPublicRestPoi(restFallbacks, selectedPois);
   if (stepNeedsDrink(step) && !stepNeedsFood(step)) return selectDrinkPoi(drinkFallbacks, selectedPois);
   if (tier === "high") return selectFoodPoiByPlanType([...foodFallbacks, ...drinkFallbacks], "vibe", route?.userBudget, selectedPois);
   return selectFoodPoiByPlanType(foodFallbacks, route?.fallbackPlanType || route?.foodPoiPlanType, route?.userBudget, selectedPois);
@@ -234,6 +282,8 @@ async function searchPoi(keyword, fallbackCost, route, step) {
     ? selectDrinkPoi(usable, selected)
     : keywordRequiresDining(keyword)
       ? selectFoodPoiByPlanType(usable, route?.fallbackPlanType || route?.foodPoiPlanType, route?.userBudget, selected)
+      : keywordRequiresPublicRest(keyword)
+        ? selectPublicRestPoi(usable, selected)
       : usable[0];
   const fallbackPoi = selectedPoi || fallbackPoiForStep(route, step, selected);
   if (!fallbackPoi) return null;
