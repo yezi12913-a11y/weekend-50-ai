@@ -8,7 +8,7 @@ import { formatTimePreference, isRouteTimeFit, timePreferenceLabelForAi } from "
 import { estimateTransitCost } from "./transitEstimate.js";
 import { buildAmapNavigationUrl, buildCopyableRouteText } from "./utils/mapLinks.js";
 import { copyTextToClipboard } from "./utils/clipboard.js";
-import { resolveRoutePois, sanitizePlanForDestination } from "./utils/routePoiResolver.js";
+import { resolveRoutePois, sanitizePlanForDestination, sanitizePlanSpatialConsistency } from "./utils/routePoiResolver.js";
 
 const activityOptions = [
   "逛街",
@@ -1444,9 +1444,10 @@ function generateRecommendations(form) {
     const anchoredRoute = anchorRouteCopyToSelectedDestination(route, form);
     const cloned = cloneWithAdjustments({ ...anchoredRoute, usedFoodPoiNames: [...usedFoodPoiNames] }, form, ["cheap", "steady", "vibe"][index], index);
     const locked = isSpecificDestination(form.destination) ? sanitizePlanForDestination(cloned, form.destination) : cloned;
-    const foodStep = locked.steps.find((step) => /餐|吃|小吃|正餐|简餐|咖啡|甜品|饮品|美食区|快餐/.test(`${step.place}${step.action}`));
+    const spatiallyConsistent = sanitizePlanSpatialConsistency(locked, locked.destination);
+    const foodStep = spatiallyConsistent.steps.find((step) => /餐|吃|小吃|正餐|简餐|咖啡|甜品|饮品|美食区|快餐/.test(`${step.place}${step.action}`));
     if (foodStep?.place) usedFoodPoiNames.add(foodStep.place);
-    return locked;
+    return spatiallyConsistent;
   });
 }
 

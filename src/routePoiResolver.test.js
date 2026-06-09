@@ -13,11 +13,13 @@ import {
   isFoodPoi,
   isOpenPoi,
   isPoiAllowedForDestination,
+  isPoiWithinCoreZone,
   isPlayablePoi,
   isPublicRestPoi,
   isRetailOnlyPoi,
   filterPublicRestPois,
   sanitizePlanForDestination,
+  validatePlanSpatialConsistency,
   selectFoodPoiByPlanType
 } from "./utils/routePoiResolver.js";
 
@@ -189,4 +191,43 @@ test("sanitizes explicit Blue Harbor plans so steps cannot point to Xidan", () =
   assert.equal(sanitized.destination, "蓝色港湾");
   assert.doesNotMatch(text, /西单|西单大悦城|麦当劳（西单附近）|便利蜂（西单附近）/);
   assert.match(text, /蓝色港湾|SOLANA|亮马河|枣营|亮马桥/);
+});
+
+test("Heshenghui core zone rejects distant mall fallbacks by keyword and distance", () => {
+  const group = getDestinationGroup("合生汇");
+  const pois = [
+    { name: "西单大悦城公共休息区", type: "购物服务;商场", address: "北京市西城区西单北大街131号", lat: 39.9107, lng: 116.3749 },
+    { name: "合生汇B1平价餐饮", type: "餐饮服务;快餐厅", address: "北京市朝阳区合生汇B1", lat: 39.894, lng: 116.481 },
+    { name: "九龙山附近简餐", type: "餐饮服务;快餐厅", address: "北京市朝阳区九龙山地铁站周边", lat: 39.893, lng: 116.478 }
+  ];
+
+  assert.ok(group);
+  assert.equal(isPoiWithinCoreZone(pois[0], "合生汇"), false);
+  assert.equal(isPoiWithinCoreZone(pois[1], "合生汇"), true);
+  assert.equal(isPoiWithinCoreZone(pois[2], "合生汇"), true);
+  assert.deepEqual(filterPoisByDestinationGroup(pois, "合生汇").map((poi) => poi.name), [
+    "合生汇B1平价餐饮",
+    "九龙山附近简餐"
+  ]);
+});
+
+test("sanitizes Heshenghui plans so every step stays in the core zone", () => {
+  const plan = {
+    routeName: "合生汇低预算逛吃路线",
+    destination: "合生汇",
+    relatedDestinations: ["合生汇"],
+    nearbyDestinations: ["九龙山"],
+    steps: [
+      { place: "西单大悦城公共休息区", action: "休息", cost: 0, tip: "错误兜底", lat: 39.9107, lng: 116.3749 },
+      { place: "麦当劳（西单附近）", action: "选择平价小吃", cost: 22, tip: "错误餐饮", lat: 39.9072, lng: 116.3742 },
+      { place: "便利蜂（西单附近）", action: "买水补给", cost: 10, tip: "错误饮品", lat: 39.907, lng: 116.374 }
+    ]
+  };
+
+  const sanitized = sanitizePlanForDestination(plan, "合生汇");
+  const text = sanitized.steps.map((step) => `${step.place}${step.action}${step.tip}${step.amapKeyword || ""}`).join(" ");
+
+  assert.equal(validatePlanSpatialConsistency(sanitized, "合生汇"), true);
+  assert.doesNotMatch(text, /西单|西单大悦城|朝阳大悦城|三里屯|蓝色港湾|798|牛街|奥森|首钢园/);
+  sanitized.steps.forEach((step) => assert.equal(isPoiWithinCoreZone(step, "合生汇"), true, step.place));
 });

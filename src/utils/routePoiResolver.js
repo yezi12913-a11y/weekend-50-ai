@@ -36,6 +36,37 @@ const foodStepPattern = /吃饭|正餐|简餐|小吃|餐饮|午餐|晚餐|吃点
 const drinkStepPattern = /喝水|买水|饮料|奶茶|咖啡|休息补给|补给|饮品|甜品/;
 const publicRestStepPattern = /散步|休息|打卡|拍照|放空|坐一会|坐着|停留|公共空间|公共区|湖边|河边|街区|广场|公园|橱窗|夜景|漫游|慢走/;
 
+function toLockedFallbackList(names, center, type, estimatedCost = 0) {
+  return names.map((name) => lockedFallback(name, `北京市${name}附近`, center.lat, center.lng, estimatedCost, type));
+}
+
+function parseLngLatLocation(location) {
+  if (typeof location !== "string") return null;
+  const [lng, lat] = location.split(",").map(Number);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function pointForSpatialCheck(poi) {
+  if (Number.isFinite(poi?.lat) && Number.isFinite(poi?.lng)) return { lat: poi.lat, lng: poi.lng };
+  if (Number.isFinite(poi?.primaryPoi?.lat) && Number.isFinite(poi?.primaryPoi?.lng)) {
+    return { lat: poi.primaryPoi.lat, lng: poi.primaryPoi.lng };
+  }
+  return parseLngLatLocation(poi?.location);
+}
+
+export function haversineDistanceKm(a, b) {
+  if (!a || !b) return Infinity;
+  const toRad = (value) => value * Math.PI / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadiusKm * Math.asin(Math.sqrt(h));
+}
+
 function lockedFallback(name, address, lat, lng, estimatedCost, type) {
   return {
     name,
@@ -52,9 +83,40 @@ function lockedFallback(name, address, lat, lng, estimatedCost, type) {
 }
 
 const destinationPoiGroups = {
+  合生汇: {
+    aliases: ["合生汇", "合生汇B1", "合生汇 B1", "21街区"],
+    center: { lng: 116.481, lat: 39.894 },
+    maxDistanceKm: 3,
+    allowedKeywords: ["合生汇", "合生汇B1", "合生汇 B1", "21街区", "九龙山", "大郊亭", "西大望路"],
+    forbiddenKeywords: ["西单", "西单大悦城", "朝阳大悦城", "三里屯", "蓝色港湾", "798", "牛街", "奥森", "首钢园"],
+    fallbackPois: {
+      rest: [
+        lockedFallback("合生汇公共休息区", "北京市朝阳区西大望路甲21号合生汇", 39.894, 116.481, 0, "购物服务;商场"),
+        lockedFallback("合生汇商场休息区", "北京市朝阳区西大望路甲21号合生汇", 39.894, 116.481, 0, "购物服务;商场"),
+        lockedFallback("21街区公共座位区", "北京市朝阳区合生汇21街区", 39.894, 116.481, 0, "购物服务;商场")
+      ],
+      food: [
+        lockedFallback("合生汇B1平价餐饮", "北京市朝阳区合生汇B1", 39.894, 116.481, 30, "餐饮服务;快餐厅"),
+        lockedFallback("21街区小吃", "北京市朝阳区合生汇21街区", 39.894, 116.481, 28, "餐饮服务;小吃快餐"),
+        lockedFallback("九龙山附近简餐", "北京市朝阳区九龙山地铁站周边", 39.893, 116.478, 32, "餐饮服务;快餐厅")
+      ],
+      drink: [
+        lockedFallback("合生汇内咖啡店", "北京市朝阳区合生汇", 39.894, 116.481, 20, "餐饮服务;咖啡厅"),
+        lockedFallback("合生汇内奶茶店", "北京市朝阳区合生汇", 39.894, 116.481, 18, "餐饮服务;饮品店"),
+        lockedFallback("合生汇附近便利店", "北京市朝阳区西大望路合生汇附近", 39.894, 116.481, 12, "购物服务;便利店")
+      ],
+      photo: [
+        lockedFallback("合生汇商场中庭", "北京市朝阳区西大望路甲21号合生汇", 39.894, 116.481, 0, "购物服务;商场"),
+        lockedFallback("21街区特色街区", "北京市朝阳区合生汇21街区", 39.894, 116.481, 0, "购物服务;商场"),
+        lockedFallback("合生汇外广场", "北京市朝阳区合生汇外广场", 39.894, 116.481, 0, "风景名胜;公园广场")
+      ]
+    }
+  },
   蓝色港湾: {
     aliases: ["蓝色港湾", "SOLANA", "SOLANA蓝色港湾", "SOLANA 蓝色港湾", "蓝色港湾商区"],
-    allowedKeywords: ["蓝色港湾", "SOLANA", "枣营", "亮马桥", "亮马河", "朝阳公园"],
+    center: { lng: 116.4747, lat: 39.9483 },
+    maxDistanceKm: 3,
+    allowedKeywords: ["蓝色港湾", "SOLANA", "枣营", "亮马桥", "亮马河"],
     forbiddenKeywords: ["西单", "合生汇", "三里屯", "798", "牛街", "奥森", "首钢园", "什刹海", "护国寺", "五道营"],
     fallbackPois: {
       rest: [
@@ -81,7 +143,9 @@ const destinationPoiGroups = {
   },
   三里屯: {
     aliases: ["三里屯", "太古里", "三里屯太古里"],
-    allowedKeywords: ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆", "亮马河"],
+    center: { lng: 116.4540, lat: 39.9367 },
+    maxDistanceKm: 3,
+    allowedKeywords: ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆"],
     forbiddenKeywords: ["西单", "合生汇", "798", "牛街", "奥森", "首钢园"],
     fallbackPois: {
       rest: [lockedFallback("三里屯太古里公共休息区", "北京市朝阳区三里屯路19号", 39.9367, 116.4551, 0, "购物服务;商场")],
@@ -92,6 +156,8 @@ const destinationPoiGroups = {
   },
   "798": {
     aliases: ["798", "798艺术区", "UCCA"],
+    center: { lng: 116.4976, lat: 39.9843 },
+    maxDistanceKm: 3,
     allowedKeywords: ["798", "UCCA", "酒仙桥", "将台", "望京南", "高家园"],
     forbiddenKeywords: ["西单", "合生汇", "三里屯", "牛街", "奥森", "首钢园"],
     fallbackPois: {
@@ -103,6 +169,30 @@ const destinationPoiGroups = {
   }
 };
 
+const genericMallZones = {
+  朝阳大悦城: { center: { lng: 116.5196, lat: 39.9247 }, allowedKeywords: ["朝阳大悦城", "青年路", "朝阳北路"], forbiddenKeywords: ["合生汇", "西单", "三里屯", "蓝色港湾", "798", "牛街", "奥森"] },
+  西单大悦城: { center: { lng: 116.3746, lat: 39.9098 }, allowedKeywords: ["西单大悦城", "西单", "灵境胡同"], forbiddenKeywords: ["合生汇", "朝阳大悦城", "三里屯", "蓝色港湾", "798", "牛街", "奥森"] },
+  荟聚: { center: { lng: 116.3285, lat: 39.7894 }, allowedKeywords: ["荟聚", "西红门"], forbiddenKeywords: ["合生汇", "西单", "朝阳大悦城", "三里屯", "蓝色港湾", "798"] },
+  大悦春风里: { center: { lng: 116.348, lat: 39.724 }, allowedKeywords: ["大悦春风里", "大兴新城", "黄村西大街"], forbiddenKeywords: ["合生汇", "西单", "朝阳大悦城", "三里屯", "蓝色港湾", "798"] }
+};
+
+Object.entries(genericMallZones).forEach(([name, zone]) => {
+  const base = {
+    aliases: [name],
+    center: zone.center,
+    maxDistanceKm: 3,
+    allowedKeywords: zone.allowedKeywords,
+    forbiddenKeywords: zone.forbiddenKeywords,
+    fallbackPois: {
+      rest: toLockedFallbackList([`${name}公共休息区`, `${name}商场休息区`], zone.center, "购物服务;商场", 0),
+      food: toLockedFallbackList([`${name}平价餐饮`, `${name}B1简餐`], zone.center, "餐饮服务;快餐厅", 35),
+      drink: toLockedFallbackList([`${name}内咖啡店`, `${name}附近便利店`], zone.center, "餐饮服务;饮品店", 18),
+      photo: toLockedFallbackList([`${name}商场中庭`, `${name}外广场`], zone.center, "购物服务;商场", 0)
+    }
+  };
+  destinationPoiGroups[name] = base;
+});
+
 function textForDestinationLock(item) {
   return `${item?.name || ""}${item?.place || ""}${item?.action || ""}${item?.tip || ""}${item?.address || ""}${item?.amapKeyword || ""}${item?.type || ""}${item?.primaryPoi?.name || ""}${item?.primaryPoi?.address || ""}`;
 }
@@ -113,19 +203,43 @@ export function getDestinationGroup(destination) {
   return Object.entries(destinationPoiGroups).find(([name, group]) => name === text || group.aliases.some((alias) => text.includes(alias) || alias.includes(text)))?.[1] || null;
 }
 
-export function isPoiAllowedForDestination(poi, selectedDestination) {
-  const group = getDestinationGroup(selectedDestination);
+export function getCoreDestinationZone(destination) {
+  return getDestinationGroup(destination);
+}
+
+export const destinationZones = destinationPoiGroups;
+
+export function isPoiWithinCoreZone(poi, coreDestination) {
+  const group = getCoreDestinationZone(coreDestination);
   if (!group) return true;
   const text = textForDestinationLock(poi);
   if (!text) return false;
   if (group.forbiddenKeywords.some((word) => text.includes(word))) return false;
+
+  const point = pointForSpatialCheck(poi);
+  if (point && group.center) {
+    return haversineDistanceKm(point, group.center) <= (group.maxDistanceKm || 3);
+  }
+
   return [...group.aliases, ...group.allowedKeywords].some((word) => text.includes(word));
+}
+
+export function isPoiAllowedForDestination(poi, selectedDestination) {
+  const group = getDestinationGroup(selectedDestination);
+  if (!group) return true;
+  return isPoiWithinCoreZone(poi, selectedDestination);
 }
 
 export function filterPoisByDestinationGroup(pois, selectedDestination) {
   const group = getDestinationGroup(selectedDestination);
   if (!group) return pois || [];
-  return (pois || []).filter((poi) => isPoiAllowedForDestination(poi, selectedDestination));
+  return filterPoisByCoreZone(pois, selectedDestination);
+}
+
+export function filterPoisByCoreZone(pois, coreDestination) {
+  const group = getCoreDestinationZone(coreDestination);
+  if (!group) return pois || [];
+  return (pois || []).filter((poi) => isPoiWithinCoreZone(poi, coreDestination));
 }
 
 function fallbackKindForStep(step) {
@@ -147,13 +261,13 @@ function stepAllowedForDestination(step, selectedDestination) {
   const group = getDestinationGroup(selectedDestination);
   if (!group) return true;
   if (!step || isForbiddenPrivatePlacePoi(step)) return false;
-  return isPoiAllowedForDestination(step, selectedDestination);
+  return isPoiWithinCoreZone(step, selectedDestination);
 }
 
-export function sanitizePlanForDestination(plan, selectedDestination) {
-  const group = getDestinationGroup(selectedDestination);
+export function sanitizePlanSpatialConsistency(plan, coreDestination) {
+  const group = getDestinationGroup(coreDestination || plan?.destination);
   if (!plan || !group) return plan;
-  const selected = String(selectedDestination || plan.destination || "").trim();
+  const selected = String(coreDestination || plan.destination || "").trim();
   const used = new Set();
   const steps = (plan.steps || []).map((step) => {
     if (stepAllowedForDestination(step, selected)) {
@@ -192,6 +306,17 @@ export function sanitizePlanForDestination(plan, selectedDestination) {
     nearbyDestinations: group.allowedKeywords.filter((term) => term !== selected),
     steps
   };
+}
+
+export function validatePlanSpatialConsistency(plan, coreDestination) {
+  const group = getCoreDestinationZone(coreDestination || plan?.destination);
+  if (!plan || !group) return true;
+  return (plan.steps || []).every((step) => isPoiWithinCoreZone(step, coreDestination || plan.destination)
+    && (!step.primaryPoi || isPoiWithinCoreZone(step.primaryPoi, coreDestination || plan.destination)));
+}
+
+export function sanitizePlanForDestination(plan, selectedDestination) {
+  return sanitizePlanSpatialConsistency(plan, selectedDestination || plan?.destination);
 }
 
 export function stepNeedsRealPoi(step) {

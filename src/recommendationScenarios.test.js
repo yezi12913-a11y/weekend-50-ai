@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { createServer } from "vite";
 import { buildCopyableRouteText } from "./utils/mapLinks.js";
+import { isPoiWithinCoreZone } from "./utils/routePoiResolver.js";
 
 let appModule;
 
@@ -62,6 +63,19 @@ function assertRoutesStayInDestinationGroup(routes, groupTerms, forbiddenTerms) 
     const text = `${routeText(route)} ${buildCopyableRouteText(route, { start: "外交学院" })}`;
     assert.ok(groupTerms.some((term) => text.includes(term)), `${route.routeName} should stay in ${groupTerms.join("/")}`);
     assert.doesNotMatch(text, new RegExp(forbiddenTerms.join("|")), `${route.routeName} should not mention unrelated destinations`);
+  });
+}
+
+function assertRouteStepsStayInCoreZone(routes, destination, forbiddenTerms) {
+  routes.forEach((route) => {
+    const text = `${routeText(route)} ${buildCopyableRouteText(route, { start: "外交学院" })}`;
+    assert.doesNotMatch(text, new RegExp(forbiddenTerms.join("|")), `${route.routeName} should not mention unrelated destinations`);
+    (route.steps || []).forEach((step) => {
+      assert.equal(isPoiWithinCoreZone(step, destination), true, `${route.routeName} step ${step.place} should stay near ${destination}`);
+      if (step.primaryPoi) {
+        assert.equal(isPoiWithinCoreZone(step.primaryPoi, destination), true, `${route.routeName} primary POI should stay near ${destination}`);
+      }
+    });
   });
 }
 
@@ -216,6 +230,33 @@ test("Blue Harbor explicit destination only returns Blue Harbor group plans", as
   assertRoutesStayInDestinationGroup(routes, ["蓝色港湾", "亮马河", "枣营", "亮马桥"], ["三里屯", "奥森", "牛街", "798", "首钢园", "西单", "合生汇"]);
 });
 
+test("Heshenghui explicit destination keeps all generated steps within Heshenghui core zone", async () => {
+  const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    destination: "合生汇",
+    customBudget: "50",
+    activities: ["逛街", "吃东西", "雨天室内"],
+    moods: ["想省钱", "想聊天"]
+  }));
+
+  assert.equal(routes.length, 3);
+  routes.forEach((route) => assert.ok(isRouteRelatedToDestination(route, "合生汇"), route.routeName));
+  assertRouteStepsStayInCoreZone(routes, "合生汇", ["西单", "西单大悦城", "朝阳大悦城", "三里屯", "蓝色港湾", "798", "牛街", "奥森", "首钢园"]);
+});
+
+test("Blue Harbor generated steps stay within Blue Harbor Zaoying Liangmaqiao Liangmahe zone", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    destination: "蓝色港湾",
+    customBudget: "120",
+    activities: ["拍照打卡", "低预算约会", "吃东西"],
+    moods: ["想有一点仪式感", "想聊天"]
+  }));
+
+  assert.equal(routes.length, 3);
+  assertRouteStepsStayInCoreZone(routes, "蓝色港湾", ["三里屯", "西单", "合生汇", "798", "朝阳大悦城"]);
+});
+
 test("Sanlitun explicit destination only returns Sanlitun group plans", async () => {
   const { generateRecommendations, isRouteRelatedToDestination } = await loadAppModule();
   const routes = generateRecommendations(makeForm({
@@ -228,6 +269,38 @@ test("Sanlitun explicit destination only returns Sanlitun group plans", async ()
   assert.equal(routes.length, 3);
   routes.forEach((route) => assert.ok(isRouteRelatedToDestination(route, "三里屯"), route.routeName));
   assertRoutesStayInDestinationGroup(routes, ["三里屯", "太古里", "团结湖", "东大桥", "农业展览馆"], ["奥森", "牛街", "798", "首钢园", "西单", "合生汇"]);
+});
+
+test("Sanlitun generated steps stay within Sanlitun Tuanjiehu Agricultural Exhibition Dongdaqiao zone", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const routes = generateRecommendations(makeForm({
+    destination: "三里屯",
+    customBudget: "120",
+    activities: ["逛街", "拍照打卡", "吃东西"],
+    moods: ["想聊天", "想有一点仪式感"]
+  }));
+
+  assert.equal(routes.length, 3);
+  assertRouteStepsStayInCoreZone(routes, "三里屯", ["西单", "合生汇", "798", "蓝色港湾", "朝阳大悦城"]);
+});
+
+test("mall plans never use another mall's rest area", async () => {
+  const { generateRecommendations } = await loadAppModule();
+  const mallDestinations = ["合生汇", "蓝色港湾", "三里屯", "西单大悦城", "朝阳大悦城"];
+  const otherMallRest = {
+    合生汇: /西单大悦城公共休息区|朝阳大悦城公共休息区|三里屯太古里公共休息区|蓝色港湾公共休息区/,
+    蓝色港湾: /西单大悦城公共休息区|朝阳大悦城公共休息区|三里屯太古里公共休息区|合生汇公共休息区/,
+    三里屯: /西单大悦城公共休息区|朝阳大悦城公共休息区|蓝色港湾公共休息区|合生汇公共休息区/,
+    西单大悦城: /合生汇公共休息区|朝阳大悦城公共休息区|三里屯太古里公共休息区|蓝色港湾公共休息区/,
+    朝阳大悦城: /合生汇公共休息区|西单大悦城公共休息区|三里屯太古里公共休息区|蓝色港湾公共休息区/
+  };
+
+  mallDestinations.forEach((destination) => {
+    const routes = generateRecommendations(makeForm({ destination, activities: ["逛街", "吃东西"], customBudget: "80" }));
+    routes.forEach((route) => {
+      assert.doesNotMatch(routeText(route), otherMallRest[destination], `${destination} should not use another mall rest area`);
+    });
+  });
 });
 
 test("798 explicit destination only returns 798 group plans", async () => {
